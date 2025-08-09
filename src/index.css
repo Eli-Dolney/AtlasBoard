@@ -1,0 +1,48 @@
+@import "tailwindcss";
+
+html, body, #root {
+  height: 100%;
+}
+
+/* Utility helpers for the app shell */
+.app-shell {
+  @apply h-full w-full bg-neutral-50 text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100;
+}
+
+/* App UI helpers */
+.topbar {
+  @apply absolute left-3 right-3 top-3 z-50 flex items-center justify-between rounded-xl border border-neutral-200 bg-white/90 px-4 py-2 shadow-lg backdrop-blur dark:border-neutral-800 dark:bg-neutral-900/80;
+}
+
+.brand {
+  @apply flex items-center gap-2 text-sm font-semibold text-neutral-700 dark:text-neutral-200;
+}
+
+.title-input {
+  @apply w-full rounded-md border border-transparent bg-transparent px-2 py-1 text-center text-base font-medium text-neutral-800 outline-none hover:border-neutral-200 focus:border-neutral-300 dark:text-neutral-100 dark:hover:border-neutral-700 dark:focus:border-neutral-600;
+}
+
+.topbar-accent {
+  @apply pointer-events-none absolute inset-x-4 bottom-0 h-[2px] rounded bg-gradient-to-r from-transparent via-blue-500/40 to-transparent;
+}
+
+.toolbar-group {
+  @apply flex items-center gap-2;
+}
+
+.toolbar-btn {
+  @apply inline-flex items-center gap-1 rounded-md border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-800 shadow-sm hover:bg-neutral-100 active:scale-[0.99] dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 dark:hover:bg-neutral-700;
+}
+
+.toolbar-sep {
+  @apply mx-2 h-6 w-px bg-neutral-200 dark:bg-neutral-700;
+}
+
+/* Left vertical toolbar */
+.leftbar {
+  @apply absolute left-3 top-20 z-50 flex flex-col gap-2 rounded-xl border border-neutral-200 bg-white/90 p-2 shadow-lg backdrop-blur dark:border-neutral-800 dark:bg-neutral-900/80;
+}
+
+.leftbar-btn {
+  @apply inline-flex h-9 w-9 items-center justify-center rounded-lg border border-neutral-200 bg-white text-neutral-800 shadow hover:bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 dark:hover:bg-neutral-700;
+}
