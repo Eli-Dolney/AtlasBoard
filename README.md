@@ -16,8 +16,8 @@ Getting Started
 
 2) Clone
 ```bash
-git clone https://github.com/<your-username>/atlas-boards.git
-cd atlas-boards
+git clone https://github.com/Eli-Dolney/AtlasBoard.git
+cd AtlasBoard
 ```
 
 3) Install
@@ -34,6 +34,12 @@ Open the printed local URL (typically http://localhost:5173/).
 5) Build
 ```bash
 npm run build
+```
+Artifacts are output to `dist/` (ignored by git).
+
+6) Preview production build
+```bash
+npm run preview
 ```
 
 Keyboard Shortcuts (Canvas)
@@ -52,78 +58,28 @@ Project Structure
 - src/features/tables: TablesView
 - src/lib: Dexie DB and utilities
 
-Local Storage
-Data is saved to IndexedDB via Dexie in your browser profile. To reset, clear site data in your browser or bump the Dexie version in `src/lib/db.ts`.
+Local Data & Privacy
+- All data is stored locally in your browser via IndexedDB (Dexie). No backend or cloud sync.
+- To reset data, clear site data in your browser or bump the Dexie version in `src/lib/db.ts`.
+
+Deploying
+- Static hosting works (e.g., GitHub Pages, Netlify, Vercel). Build with `npm run build` and deploy the `dist/` folder.
+- If deploying under a subpath (e.g., GitHub Pages project site), set Vite’s `base` in `vite.config.ts` accordingly, for example:
+```ts
+// vite.config.ts
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+  base: '/AtlasBoard/', // replace with your repo name if needed
+})
+```
+
+Contributing
+- Issues and PRs welcome. Please run `npm run lint` before submitting.
 
 License
 MIT (local‑only focus).
 
-# React + TypeScript + Vite
-
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
-
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      ...tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      ...tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      ...tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
-
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+Removed template notes below for clarity.

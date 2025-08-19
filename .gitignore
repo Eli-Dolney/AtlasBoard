@@ -9,6 +9,11 @@ lerna-debug.log*
 
 # Local caches
 .npm-cache
+/.cache
+.eslintcache
+.vite
+.turbo
+.parcel-cache
 
 node_modules
 dist
@@ -29,3 +34,9 @@ dist-ssr
 # Env files
 .env
 .env.*
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Test coverage
+coverage
