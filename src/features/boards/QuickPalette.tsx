@@ -22,7 +22,7 @@ export default function QuickPalette({ open, onClose, actions }: QuickPalettePro
       <div className="relative w-[560px] rounded-xl border border-neutral-200 bg-white p-4 shadow-xl dark:border-neutral-800 dark:bg-neutral-900">
         <div className="mb-3 text-sm font-medium">Quick Create</div>
         <div className="grid grid-cols-2 gap-2">
-          {actions.map((a) => (
+          {actions.map(a => (
             <button
               key={a.key}
               className="rounded-lg border border-neutral-200 bg-white px-3 py-2 text-left text-sm shadow hover:bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-800"
@@ -40,5 +40,3 @@ export default function QuickPalette({ open, onClose, actions }: QuickPalettePro
     </div>
   )
 }
-
-

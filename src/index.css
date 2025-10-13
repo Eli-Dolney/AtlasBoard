@@ -1,6 +1,8 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
-html, body, #root {
+html,
+body,
+#root {
   height: 100%;
 }
 
@@ -16,7 +18,7 @@ html {
 
 /* App UI helpers */
 .topbar {
-  @apply absolute left-3 right-3 top-3 z-[100] flex items-center justify-between overflow-visible rounded-xl border border-neutral-200 bg-white/90 px-2 py-2 shadow-lg backdrop-blur dark:border-neutral-800 dark:bg-neutral-900/80 md:px-4;
+  @apply absolute left-3 right-3 top-3 z-[100] flex items-center justify-between overflow-visible rounded-xl border border-neutral-200 bg-white/90 px-2 py-2 shadow-lg backdrop-blur md:px-4 dark:border-neutral-800 dark:bg-neutral-900/80;
 }
 
 .brand {
@@ -50,4 +52,33 @@ html {
 
 .leftbar-btn {
   @apply inline-flex h-9 w-9 items-center justify-center rounded-lg border border-neutral-200 bg-white text-neutral-800 shadow hover:bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 dark:hover:bg-neutral-700;
+}
+
+/* Global UI primitives */
+.btn {
+  @apply inline-flex items-center gap-1 rounded-md border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-800 shadow-sm hover:bg-neutral-100 active:scale-[0.99] dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 dark:hover:bg-neutral-700;
+}
+
+.btn-ghost {
+  @apply inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800;
+}
+
+.btn-muted {
+  @apply inline-flex items-center gap-1 rounded-md bg-neutral-200 px-2 py-1 text-sm dark:bg-neutral-700;
+}
+
+.input {
+  @apply rounded border bg-white px-2 py-1 text-sm text-neutral-900 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100;
+}
+
+.select {
+  @apply rounded border bg-white px-2 py-1 text-sm text-neutral-900 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100;
+}
+
+.card {
+  @apply rounded-xl border border-neutral-200 bg-white shadow-sm dark:border-neutral-800 dark:bg-neutral-900;
+}
+
+.section-shell {
+  @apply border-t border-neutral-200 bg-neutral-50 py-6 sm:py-10 dark:border-neutral-800 dark:bg-neutral-950;
 }

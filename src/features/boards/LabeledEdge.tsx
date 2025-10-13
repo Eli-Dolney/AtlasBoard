@@ -7,8 +7,26 @@ import {
   useReactFlow,
 } from '@reactflow/core'
 
-export default function LabeledEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style, markerEnd, data }: EdgeProps) {
-  const [path, labelX, labelY] = getSmoothStepPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition })
+export default function LabeledEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  sourcePosition,
+  targetPosition,
+  style,
+  markerEnd,
+  data,
+}: EdgeProps) {
+  const [path, labelX, labelY] = getSmoothStepPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+  })
   const { setEdges } = useReactFlow()
   const [isEditing, setIsEditing] = useState(false)
   const [value, setValue] = useState<string>(data?.label ?? '')
@@ -23,7 +41,9 @@ export default function LabeledEdge({ id, sourceX, sourceY, targetX, targetY, so
   }, [data?.label])
 
   const commit = (next: string) => {
-    setEdges((edges) => edges.map((e) => (e.id === id ? { ...e, data: { ...e.data, label: next } } : e)))
+    setEdges(edges =>
+      edges.map(e => (e.id === id ? { ...e, data: { ...e.data, label: next } } : e))
+    )
     setIsEditing(false)
   }
 
@@ -32,8 +52,12 @@ export default function LabeledEdge({ id, sourceX, sourceY, targetX, targetY, so
       <BaseEdge id={id} path={path} style={style} markerEnd={markerEnd} />
       <EdgeLabelRenderer>
         <div
-          style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`, pointerEvents: 'all' }}
-          onDoubleClick={(e) => {
+          style={{
+            position: 'absolute',
+            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+            pointerEvents: 'all',
+          }}
+          onDoubleClick={e => {
             e.stopPropagation()
             setIsEditing(true)
           }}
@@ -41,18 +65,21 @@ export default function LabeledEdge({ id, sourceX, sourceY, targetX, targetY, so
           {isEditing ? (
             <input
               ref={inputRef}
-              className="rounded border border-slate-300 bg-white px-1 py-0.5 text-xs outline-none shadow"
+              className="rounded border border-slate-300 bg-white px-1 py-0.5 text-xs shadow outline-none"
               value={value}
-              onChange={(e) => setValue(e.target.value)}
+              onChange={e => setValue(e.target.value)}
               onBlur={() => commit(value)}
-              onKeyDown={(e) => {
+              onKeyDown={e => {
                 if (e.key === 'Enter') commit(value)
                 if (e.key === 'Escape') setIsEditing(false)
               }}
-              onPointerDown={(e) => e.stopPropagation()}
+              onPointerDown={e => e.stopPropagation()}
             />
           ) : (
-            <div className="rounded bg-white/70 px-1 text-xs text-slate-700 shadow" onPointerDown={(e) => e.stopPropagation()}>
+            <div
+              className="rounded bg-white/70 px-1 text-xs text-slate-700 shadow"
+              onPointerDown={e => e.stopPropagation()}
+            >
               {data?.label ?? ''}
             </div>
           )}
@@ -61,5 +88,3 @@ export default function LabeledEdge({ id, sourceX, sourceY, targetX, targetY, so
     </>
   )
 }
-
-

@@ -1,5 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ReactFlow, addEdge, useEdgesState, useNodesState, type Edge, type Node, type OnConnect, useReactFlow } from '@reactflow/core'
+import {
+  ReactFlow,
+  addEdge,
+  useEdgesState,
+  useNodesState,
+  type Edge,
+  type Node,
+  type OnConnect,
+} from '@reactflow/core'
 import { MiniMap } from '@reactflow/minimap'
 import { Controls } from '@reactflow/controls'
 import { Background } from '@reactflow/background'
@@ -14,8 +22,14 @@ import LabeledEdge from './LabeledEdge'
 import * as htmlToImage from 'html-to-image'
 import NoteNode from './NoteNode'
 import ChecklistNode from './ChecklistNode'
+import KanbanNode from './KanbanNode'
+import TimelineNode from './TimelineNode'
+import MatrixNode from './MatrixNode'
 import QuickPalette from './QuickPalette'
-import { emitOpenTask } from '../../lib/events'
+import { emitOpenTask, onOpenQuickPalette } from '../../lib/events'
+import { extractOutboundTitles } from '../../lib/links'
+import { SearchDialog } from '../../components/SearchDialog'
+import { searchService, type SearchResult } from '../../lib/search'
 
 // --- helpers for layout
 function radialLayout(rootId: string, nodes: Node[], edges: Edge[]): Node[] {
@@ -37,24 +51,86 @@ function radialLayout(rootId: string, nodes: Node[], edges: Edge[]): Node[] {
 			walk(kid, radius * 1.2)
 		})
 	}
-	walk(rootId, 220)
-	return nodes.map((n) => (placed.has(n.id) ? { ...n, position: placed.get(n.id)! } : n))
+  walk(rootId, 280) // Increased radius for better spacing
+  return nodes.map(n => (placed.has(n.id) ? { ...n, position: placed.get(n.id)! } : n))
 }
+
+// --- Node and Edge Types (defined outside component to avoid React Flow warnings)
+const nodeTypes = {
+  editable: EditableNode,
+  note: NoteNode,
+  checklist: ChecklistNode,
+  kanban: KanbanNode,
+  timeline: TimelineNode,
+  matrix: MatrixNode,
+}
+
+const edgeTypes = { labeled: LabeledEdge }
 
 // move tidyLayout definition here (before insertTemplate)
 const tidyLayout = (function () {
-	return function (this: void, nodes: Node[], edges: Edge[], setNodes: ReturnType<typeof useNodesState>[1]) {
-		const incoming = new Set(edges.map((e) => e.target as string))
-		const root = nodes.find((n) => !incoming.has(n.id)) ?? nodes[0]
+  return function (
+    this: void,
+    nodes: Node[],
+    edges: Edge[],
+    setNodes: ReturnType<typeof useNodesState>[1]
+  ) {
+    const incoming = new Set(edges.map(e => e.target as string))
+    const root = nodes.find(n => !incoming.has(n.id)) ?? nodes[0]
 		if (!root) return
 		const laidOut = radialLayout(root.id, nodes, edges)
-		setNodes((cur) =>
-			cur.map((n) => {
-				const next = laidOut.find((x) => x.id === n.id)
+    setNodes(cur =>
+      cur.map(n => {
+        const next = laidOut.find(x => x.id === n.id)
 				return next ? { ...n, position: next.position } : n
-			}),
+      })
 		)
 	}
+})()
+
+// --- layout functions (moved before insertTemplate to avoid dependency issues)
+const hierarchicalLayout = (function () {
+  return function (rootId: string, allNodes: Node[], allEdges: Edge[]) {
+    const children = new Map<string, string[]>()
+    const parents = new Map<string, string>()
+    for (const e of allEdges) {
+      const s = String(e.source)
+      const t = String(e.target)
+      if (!children.has(s)) children.set(s, [])
+      children.get(s)!.push(t)
+      parents.set(t, s)
+    }
+    const depth = new Map<string, number>()
+    const layers: Map<number, string[]> = new Map()
+    const q: string[] = [rootId]
+    depth.set(rootId, 0)
+    while (q.length) {
+      const cur = q.shift() as string
+      const d = depth.get(cur) as number
+      if (!layers.has(d)) layers.set(d, [])
+      layers.get(d)!.push(cur)
+      for (const k of children.get(cur) ?? []) {
+        if (!depth.has(k)) {
+          depth.set(k, d + 1)
+          q.push(k)
+        }
+      }
+    }
+    const xStep = 280 // Increased horizontal spacing
+    const yStep = 140 // Increased vertical spacing
+    const positioned = new Map<string, { x: number; y: number }>()
+    const maxLayer = Math.max(...Array.from(layers.keys()))
+    for (let d = 0; d <= maxLayer; d++) {
+      const ids = layers.get(d) ?? []
+      const totalHeight = (ids.length - 1) * yStep
+      ids.forEach((id, i) => {
+        const x = d * xStep
+        const y = -totalHeight / 2 + i * yStep
+        positioned.set(id, { x, y })
+      })
+    }
+    return allNodes.map(n => (positioned.has(n.id) ? { ...n, position: positioned.get(n.id)! } : n))
+  }
 })()
 
 type BoardCanvasProps = {
@@ -63,20 +139,84 @@ type BoardCanvasProps = {
   onOpenTools?: (tab: 'kanban' | 'tables') => void
 }
 
+// Node data interface for type safety
+interface NodeData {
+  label?: string
+  text?: string
+  color?: string
+  shape?: string
+  fontSize?: number
+  collapsed?: boolean
+  editing?: boolean
+  columns?: KanbanColumn[]
+  events?: TimelineEvent[]
+  matrixData?: MatrixNodeData
+  items?: ChecklistItem[]
+}
+
+// Supporting interfaces
+interface KanbanColumn {
+  id: string
+  title: string
+  items: KanbanItem[]
+}
+
+interface KanbanItem {
+  id: string
+  title: string
+  priority?: 'low' | 'medium' | 'high'
+  assignee?: string
+}
+
+interface TimelineEvent {
+  id: string
+  title: string
+  date: string
+  description?: string
+  type: 'milestone' | 'task' | 'deadline'
+  status?: 'pending' | 'in-progress' | 'completed'
+  assignee?: string
+}
+
+interface MatrixNodeData {
+  title: string
+  rows: string[]
+  columns: string[]
+  cells: MatrixCell[][]
+}
+
+interface MatrixCell {
+  id: string
+  content: string
+  priority?: 'low' | 'medium' | 'high'
+  category?: string
+}
+
+interface ChecklistItem {
+  id: string
+  text: string
+  done: boolean
+}
+
 export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, onOpenTools }) => {
-  const initialNodes = useMemo<Node[]>(() => [
+  const initialNodes = useMemo<Node[]>(
+    () => [
     {
       id: 'n1',
       position: { x: 0, y: 0 },
       data: { label: 'Central Idea' },
       type: 'editable',
     },
-  ], [])
+    ],
+    []
+  )
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge[]>([])
   const [loaded, setLoaded] = useState(false)
   const [title, setTitle] = useState('Untitled Board')
+  const [focusRootId, setFocusRootId] = useState<string | null>(null)
+  const [showSearch, setShowSearch] = useState(false)
 
   // simple undo/redo history
   type Snapshot = { nodes: Node[]; edges: Edge[] }
@@ -91,10 +231,10 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
       if (rec?.data) {
         try {
           const parsed = JSON.parse(rec.data) as { nodes: Node[]; edges: Edge[] }
-          const upgradedNodes: Node[] = parsed.nodes.map((n) => ({
+          const upgradedNodes: Node[] = parsed.nodes.map(n => ({
             ...n,
             type: 'editable',
-            data: { label: n?.data?.label ?? 'New Node', ...n.data },
+            data: { label: (n?.data as NodeData)?.label ?? 'New Node', ...(n.data as NodeData) },
           }))
           setNodes(upgradedNodes)
           setEdges(parsed.edges)
@@ -104,10 +244,19 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
       }
       setTitle(rec?.title ?? 'Untitled Board')
       setLoaded(true)
+
+      // Initialize search service
+      try {
+        await searchService.initialize()
+      } catch (error) {
+        console.warn('Failed to initialize search service:', error)
+      }
     })()
   }, [boardId, setEdges, setNodes])
 
-  const persist = useMemo(() => debounce(async (n: Node[], e: Edge[]) => {
+  const persist = useMemo(
+    () =>
+      debounce(async (n: Node[], e: Edge[]) => {
     const payload = JSON.stringify({ nodes: n, edges: e })
     await db.boards.put({
       id: boardId,
@@ -116,7 +265,9 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
       data: payload,
       updatedAt: Date.now(),
     })
-  }, 500), [boardId, workspaceId, title])
+      }, 500),
+    [boardId, workspaceId, title]
+  )
 
   useEffect(() => {
     if (!loaded) return
@@ -133,13 +284,13 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
     historyIndex.current = history.current.length - 1
   }, [nodes, edges, loaded, persist])
 
-  const onConnect = useCallback<OnConnect>((connection) => {
-    setEdges((eds) => addEdge(connection, eds))
-  }, [setEdges])
+  const onConnect = useCallback<OnConnect>(
+    connection => {
+      setEdges(eds => addEdge(connection, eds))
+    },
+    [setEdges]
+  )
 
-  const deselectAll = useCallback(() => {
-    setNodes((current) => current.map((n) => ({ ...n, selected: false })))
-  }, [setNodes])
 
   const createNode = useCallback(
     (partial: Partial<Node> & { position: { x: number; y: number } }): Node => {
@@ -147,29 +298,66 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
       return {
         id,
         type: partial.type ?? 'editable',
-        data: { label: 'New Node', editing: true, ...(partial.data as object) },
+        data: { label: 'New Node', editing: true, ...(partial.data as NodeData) },
         position: partial.position,
         selected: true,
       } as Node
     },
-    [],
+    []
   )
 
   const onAddNode = useCallback(() => {
     const node = createNode({
       position: { x: Math.random() * 400 - 200, y: Math.random() * 200 - 100 },
     })
-    setNodes((cur) => cur.map((n) => ({ ...n, selected: false })).concat(node))
+    setNodes(cur => cur.map(n => ({ ...n, selected: false })).concat(node))
   }, [createNode, setNodes])
 
-  const selectedNode = useMemo(() => nodes.find((n) => n.selected), [nodes])
+  const selectedNode = useMemo(() => nodes.find(n => n.selected), [nodes])
+
+  const findNodeByTitle = useCallback(
+    (title: string) => {
+      return nodes.find(
+        n =>
+          typeof (n.data as NodeData)?.label === 'string' &&
+          ((n.data as NodeData).label as string).trim() === title.trim()
+      )
+    },
+    [nodes]
+  )
+
+  const createAndLinkFromSelection = useCallback(
+    (title: string) => {
+      if (!selectedNode) return
+      const newNode = createNode({
+        position: { x: selectedNode.position.x + 200, y: selectedNode.position.y + 120 },
+        data: { label: title, editing: false },
+      })
+      const newEdge: Edge = {
+        id: `e_${Date.now()}`,
+        source: selectedNode.id,
+        target: newNode.id,
+        type: 'smoothstep',
+      }
+      setNodes(cur => cur.map(n => ({ ...n, selected: n.id === newNode.id })).concat(newNode))
+      setEdges(cur => cur.concat(newEdge))
+      rfInstance.current?.setCenter?.(newNode.position.x, newNode.position.y, {
+        zoom: 1.1,
+        duration: 500,
+      })
+    },
+    [createNode, selectedNode, setEdges, setNodes]
+  )
 
   const onAddChild = useCallback(() => {
     if (!selectedNode) return
     const offsetX = 200
     const offsetY = 120
     const newNode = createNode({
-      position: { x: (selectedNode.position?.x ?? 0) + offsetX, y: (selectedNode.position?.y ?? 0) + offsetY },
+      position: {
+        x: (selectedNode.position?.x ?? 0) + offsetX,
+        y: (selectedNode.position?.y ?? 0) + offsetY,
+      },
     })
     const newEdge: Edge = {
       id: `e${edges.length + 1}`,
@@ -177,22 +365,22 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
       target: newNode.id,
       type: 'smoothstep',
     }
-    setNodes((cur) => cur.map((n) => ({ ...n, selected: false })).concat(newNode))
-    setEdges((cur) => cur.concat(newEdge))
+    setNodes(cur => cur.map(n => ({ ...n, selected: false })).concat(newNode))
+    setEdges(cur => cur.concat(newEdge))
   }, [createNode, edges.length, selectedNode, setEdges, setNodes])
 
   const findIncomingEdge = useCallback(() => {
     if (!selectedNode) return undefined
-    return edges.find((e) => e.target === selectedNode.id)
+    return edges.find(e => e.target === selectedNode.id)
   }, [edges, selectedNode])
 
   const onAddSibling = useCallback(() => {
     if (!selectedNode) return
     const incoming = findIncomingEdge()
-    const newNode = createNode({
+      const newNode: Node = createNode({
       position: { x: selectedNode.position.x + 220, y: selectedNode.position.y },
     })
-    setNodes((cur) => cur.map((n) => ({ ...n, selected: false })).concat(newNode))
+    setNodes(cur => cur.map(n => ({ ...n, selected: false })).concat(newNode))
     if (incoming) {
       const newEdge: Edge = {
         id: `e${edges.length + 1}`,
@@ -200,9 +388,44 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
         target: newNode.id,
         type: 'smoothstep',
       }
-      setEdges((cur) => cur.concat(newEdge))
+      setEdges(cur => cur.concat(newEdge))
     }
   }, [createNode, edges.length, findIncomingEdge, selectedNode, setEdges, setNodes])
+
+  const handleSearchResult = useCallback(
+    async (result: SearchResult) => {
+      switch (result.type) {
+        case 'board':
+          if (result.boardId) {
+            // Switch to the board
+            window.location.hash = `#board-${result.boardId}`
+          }
+          break
+        case 'node':
+          if (result.boardId && result.nodeId) {
+            // Switch to the board and focus the node
+            window.location.hash = `#board-${result.boardId}`
+            // Focus the node after navigation
+            setTimeout(() => {
+              const nodeElement = document.querySelector(`[data-id="${result.nodeId}"]`)
+              if (nodeElement) {
+                ;(nodeElement as HTMLElement).focus?.()
+              }
+            }, 100)
+          }
+          break
+        case 'task':
+          // Open task view
+          onOpenTools?.('kanban')
+          break
+        case 'list':
+          // Open task view
+          onOpenTools?.('kanban')
+          break
+      }
+    },
+    [onOpenTools]
+  )
 
   const attachNodeToSelection = useCallback(
     (type: 'note' | 'checklist', data: any) => {
@@ -220,10 +443,10 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
         target: newNode.id,
         type: 'smoothstep',
       }
-      setNodes((cur) => cur.map((n) => ({ ...n, selected: false })).concat(newNode))
-      setEdges((cur) => cur.concat(newEdge))
+      setNodes(cur => cur.map(n => ({ ...n, selected: false })).concat(newNode))
+      setEdges(cur => cur.concat(newEdge))
     },
-    [createNode, edges.length, selectedNode, setEdges, setNodes],
+    [createNode, edges.length, selectedNode, setEdges, setNodes]
   )
 
   // Save current board as a reusable template
@@ -236,19 +459,36 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
   }, [edges, nodes])
 
   const onDeleteSelected = useCallback(() => {
-    const selectedNodeIds = new Set(nodes.filter((n) => n.selected).map((n) => n.id))
-    if (selectedNodeIds.size === 0 && edges.every((e) => !e.selected)) return
-    setNodes((cur) => cur.filter((n) => !n.selected))
-    setEdges((cur) =>
-      cur.filter((e) => !e.selected && !selectedNodeIds.has(e.source as string) && !selectedNodeIds.has(e.target as string)),
+    const selectedNodeIds = new Set(nodes.filter(n => n.selected).map(n => n.id))
+    if (selectedNodeIds.size === 0 && edges.every(e => !e.selected)) return
+    setNodes(cur => cur.filter(n => !n.selected))
+    setEdges(cur =>
+      cur.filter(
+        e =>
+          !e.selected &&
+          !selectedNodeIds.has(e.source as string) &&
+          !selectedNodeIds.has(e.target as string)
+      )
     )
   }, [edges, nodes])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const active = document.activeElement as HTMLElement | null
-      const isTyping = !!active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)
-      if (isTyping) return
+      const isTyping =
+        !!active &&
+        (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)
+      if (isTyping && !showSearch) return
+
+      // Global search shortcut (Ctrl/Cmd + K)
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault()
+        setShowSearch(true)
+        return
+      }
+
+      if (showSearch) return // Let search dialog handle its own keys
+
       if (e.key === 'Backspace' || e.key === 'Delete') {
         e.preventDefault()
         onDeleteSelected()
@@ -311,39 +551,44 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onAddChild, onAddSibling, onDeleteSelected])
+  }, [onAddChild, onAddSibling, onDeleteSelected, showSearch])
 
-  const nodeTypes = useMemo(() => ({ editable: EditableNode, note: NoteNode, checklist: ChecklistNode }), [])
-  const edgeTypes = useMemo(() => ({ labeled: LabeledEdge }), [])
   const rfInstance = useRef<any>(null)
   const [showMinimap, setShowMinimap] = useState(true)
-  const [dark, setDark] = useState(false)
   const [showUI, setShowUI] = useState(true)
   const [snapToGrid, setSnapToGrid] = useState(true)
   const [search, setSearch] = useState('')
   const [showPalette, setShowPalette] = useState(false)
-  const [openMenu, setOpenMenu] = useState<null | 'insert' | 'templates' | 'file' | 'edit' | 'help'>(null)
+  const [openMenu, setOpenMenu] = useState<
+    null | 'insert' | 'templates' | 'file' | 'edit' | 'layout' | 'help'
+  >(null)
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null)
   const topbarRef = useRef<HTMLDivElement | null>(null)
 	const [templates, setTemplates] = useState<BoardTemplate[]>([])
 
+	useEffect(() => onOpenQuickPalette(() => setShowPalette(true)), [])
+
 	const refreshTemplates = useCallback(async () => {
 		const all = await db.templates.toArray()
-		all.sort((a,b)=>b.createdAt - a.createdAt)
+    all.sort((a, b) => b.createdAt - a.createdAt)
 		setTemplates(all)
 	}, [])
 
-	const applyTemplateReplace = useCallback(async (tpl: BoardTemplate) => {
+  const applyTemplateReplace = useCallback(
+    async (tpl: BoardTemplate) => {
 		try {
 			const parsed = JSON.parse(tpl.data) as { nodes: Node[]; edges: Edge[] }
-			setNodes(parsed.nodes.map((n) => ({ ...n, type: 'editable' })))
-			setEdges(parsed.edges.map((e) => ({ type: 'labeled', ...e })))
+        setNodes(parsed.nodes.map(n => ({ ...n, type: 'editable' })))
+        setEdges(parsed.edges.map(e => ({ type: 'labeled', ...e })))
 		} catch (e) {
 			console.error('Invalid template json', e)
 		}
-	}, [setEdges, setNodes])
+    },
+    [setEdges, setNodes]
+  )
 
-	const getChildren = useCallback((rootId: string): Node[] => {
+  const getChildren = useCallback(
+    (rootId: string): Node[] => {
 		const visited = new Set<string>([rootId])
 		const queue: string[] = [rootId]
 		const out: Node[] = []
@@ -353,25 +598,33 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
 				if (e.source === cur && !visited.has(e.target as string)) {
 					visited.add(e.target as string)
 					queue.push(e.target as string)
-					const n = nodes.find((x) => x.id === e.target)
+            const n = nodes.find(x => x.id === e.target)
 					if (n) out.push(n)
 				}
 			}
 		}
 		return out
-	}, [edges, nodes])
+    },
+    [edges, nodes]
+  )
 
 	const createTasksFromBranch = useCallback(async () => {
 		if (!selectedNode) return
 		const children = getChildren(selectedNode.id)
-		const listTitle = (selectedNode.data as any)?.label || 'New List'
+    const listTitle = (selectedNode.data as NodeData)?.label || 'New List'
 		const sort = Date.now()
 		const listId = `l_${Date.now()}`
 		await db.lists.put({ id: listId, workspaceId, title: listTitle, sort })
 		let idx = 1
 		for (const child of children) {
-			const title = (child.data as any)?.label || 'New Task'
-			await db.tasks.put({ id: `t_${Date.now()}_${idx++}`, listId, title, sort: idx, status: 'not-started' })
+      const title = (child.data as NodeData)?.label || 'New Task'
+      await db.tasks.put({
+        id: `t_${Date.now()}_${idx++}`,
+        listId,
+        title,
+        sort: idx,
+        status: 'not-started',
+      })
 		}
 		onOpenTools?.('kanban')
 		alert(`Created ${children.length} tasks in list "${listTitle}"`)
@@ -385,89 +638,621 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  type TemplateId = 'school' | 'business'
+  type TemplateId =
+    | 'school-organized'
+    | 'business-structured'
+    | 'project-management'
+    | 'knowledge-base'
+    | 'personal-productivity'
+    | 'decision-tree'
+    | 'timeline'
+    | 'swot-analysis'
+    | 'mind-map-starter'
+    | 'goal-planning'
+
   const insertTemplate = useCallback(
     (template: TemplateId) => {
-      // Radial placement around (0,0)
-      const centerX = 0
-      const centerY = 0
-      const radius = 260
-      const rootLabel = template === 'school' ? 'School' : 'Business'
-      const topics =
-        template === 'school'
-          ? [
-              'Classes',
-              'Homework',
-              'Tests',
-              'Projects',
-              'Study Plan',
-              'Schedule',
-              'Grades',
-              'Deadlines',
-              'Clubs',
-              'Notes',
-              'Resources',
-              'To-dos',
-            ]
-          : [
-              'Product',
-              'Marketing',
-              'Sales',
-              'Roadmap',
-              'Finance',
-              'Operations',
-              'Hiring',
-              'Metrics',
-              'Customers',
-              'Support',
-              'Partners',
-              'Tasks',
-            ]
+      const templates = {
+        'school-organized': {
+          name: 'Academic Hub',
+          structure: {
+            root: 'Academic Success',
+            sections: [
+              {
+                title: '📚 Courses',
+                children: ['Current Semester', 'Prerequisites', 'Electives', 'Study Materials'],
+              },
+              {
+                title: '📝 Assignments',
+                children: ['Weekly Tasks', 'Term Papers', 'Group Projects', 'Lab Reports'],
+              },
+              {
+                title: '📅 Schedule',
+                children: ['Class Timetable', 'Study Blocks', 'Office Hours', 'Deadlines'],
+              },
+              {
+                title: '🎯 Goals',
+                children: ['Grade Targets', 'Skill Development', 'Extracurriculars', 'Career Prep'],
+              },
+              {
+                title: '📖 Resources',
+                children: ['Textbooks', 'Online Libraries', 'Study Groups', 'Tutoring'],
+              },
+            ],
+          },
+        },
+        'business-structured': {
+          name: 'Business Framework',
+          structure: {
+            root: 'Business Strategy',
+            sections: [
+              {
+                title: '🎯 Vision & Mission',
+                children: ['Core Values', 'Strategic Goals', 'Brand Identity', 'Market Position'],
+              },
+              {
+                title: '📊 Operations',
+                children: ['Process Mapping', 'Quality Control', 'Supply Chain', 'Risk Management'],
+              },
+              {
+                title: '💰 Finance',
+                children: [
+                  'Budget Planning',
+                  'Revenue Streams',
+                  'Cost Analysis',
+                  'Investment Strategy',
+                ],
+              },
+              {
+                title: '👥 Team',
+                children: [
+                  'Organizational Chart',
+                  'Skill Gaps',
+                  'Training Programs',
+                  'Culture Building',
+                ],
+              },
+              {
+                title: '📈 Growth',
+                children: [
+                  'Market Expansion',
+                  'Product Development',
+                  'Partnerships',
+                  'Competitive Analysis',
+                ],
+              },
+            ],
+          },
+        },
+        'project-management': {
+          name: 'Project Hub',
+          structure: {
+            root: 'Project Management',
+            sections: [
+              {
+                title: '📋 Planning',
+                children: ['Scope Definition', 'Requirements', 'Timeline', 'Milestones'],
+              },
+              {
+                title: '👥 Team',
+                children: [
+                  'Roles & Responsibilities',
+                  'Communication Plan',
+                  'Stakeholder Map',
+                  'Resource Allocation',
+                ],
+              },
+              {
+                title: '⚡ Execution',
+                children: [
+                  'Task Breakdown',
+                  'Dependencies',
+                  'Progress Tracking',
+                  'Quality Assurance',
+                ],
+              },
+              {
+                title: '📊 Monitoring',
+                children: [
+                  'Status Reports',
+                  'Risk Register',
+                  'Budget Tracking',
+                  'Performance Metrics',
+                ],
+              },
+              {
+                title: '🔄 Review',
+                children: ['Lessons Learned', 'Retrospectives', 'Success Metrics', 'Next Steps'],
+              },
+            ],
+          },
+        },
+        'knowledge-base': {
+          name: 'Knowledge Hub',
+          structure: {
+            root: 'Knowledge Management',
+            sections: [
+              {
+                title: '📚 Learning',
+                children: ['Topics of Interest', 'Books to Read', 'Courses', 'Skill Development'],
+              },
+              {
+                title: '💡 Ideas',
+                children: [
+                  'Brainstorming',
+                  'Innovation Pipeline',
+                  'Problem Solving',
+                  'Creative Projects',
+                ],
+              },
+              {
+                title: '🔗 Connections',
+                children: ['Related Concepts', 'Cross-references', 'Applications', 'Implications'],
+              },
+              {
+                title: '📝 Notes',
+                children: [
+                  'Meeting Notes',
+                  'Research Findings',
+                  'Personal Insights',
+                  'Quick References',
+                ],
+              },
+              {
+                title: '🌟 Insights',
+                children: ['Key Takeaways', 'Best Practices', 'Lessons Learned', 'Action Items'],
+              },
+            ],
+          },
+        },
+        'personal-productivity': {
+          name: 'Life Organization',
+          structure: {
+            root: 'Personal Productivity',
+            sections: [
+              {
+                title: '🎯 Goals',
+                children: [
+                  'Short-term Goals',
+                  'Long-term Vision',
+                  'Quarterly Objectives',
+                  'Personal Mission',
+                ],
+              },
+              {
+                title: '📅 Time Management',
+                children: ['Daily Routines', 'Weekly Planning', 'Time Blocking', 'Priority Matrix'],
+              },
+              {
+                title: '🏠 Life Areas',
+                children: ['Health & Fitness', 'Relationships', 'Career', 'Personal Growth'],
+              },
+              {
+                title: '💼 Work-Life',
+                children: [
+                  'Professional Development',
+                  'Work Projects',
+                  'Skill Building',
+                  'Network Building',
+                ],
+              },
+              {
+                title: '🎨 Hobbies',
+                children: [
+                  'Creative Projects',
+                  'Learning Activities',
+                  'Travel Plans',
+                  'Personal Interests',
+                ],
+              },
+            ],
+          },
+        },
+        'decision-tree': {
+          name: 'Decision Framework',
+          structure: {
+            root: 'Decision Making',
+            sections: [
+              {
+                title: '🔍 Analysis',
+                children: [
+                  'Problem Statement',
+                  'Gather Information',
+                  'Identify Options',
+                  'Evaluate Criteria',
+                ],
+              },
+              {
+                title: '⚖️ Evaluation',
+                children: [
+                  'Pros & Cons',
+                  'Risk Assessment',
+                  'Impact Analysis',
+                  'Stakeholder Views',
+                ],
+              },
+              {
+                title: '✅ Decision',
+                children: [
+                  'Recommended Choice',
+                  'Rationale',
+                  'Implementation Plan',
+                  'Contingency Plans',
+                ],
+              },
+              {
+                title: '📊 Monitoring',
+                children: [
+                  'Success Metrics',
+                  'Progress Tracking',
+                  'Review Points',
+                  'Adjustment Triggers',
+                ],
+              },
+            ],
+          },
+        },
+        timeline: {
+          name: 'Timeline Planning',
+          structure: {
+            root: 'Timeline Management',
+            sections: [
+              {
+                title: '🎯 Goals',
+                children: [
+                  'Vision Statement',
+                  'Long-term Objectives',
+                  'Success Criteria',
+                  'Milestone Definition',
+                ],
+              },
+              {
+                title: '📅 Phases',
+                children: [
+                  'Planning Phase',
+                  'Execution Phase',
+                  'Monitoring Phase',
+                  'Completion Phase',
+                ],
+              },
+              {
+                title: '⏰ Milestones',
+                children: [
+                  'Key Deliverables',
+                  'Review Points',
+                  'Decision Gates',
+                  'Celebration Points',
+                ],
+              },
+              {
+                title: '📈 Progress',
+                children: [
+                  'Weekly Check-ins',
+                  'Monthly Reviews',
+                  'Quarterly Assessments',
+                  'Annual Planning',
+                ],
+              },
+            ],
+          },
+        },
+        'swot-analysis': {
+          name: 'SWOT Analysis',
+          structure: {
+            root: 'Strategic Analysis',
+            sections: [
+              {
+                title: '💪 Strengths',
+                children: [
+                  'Core Competencies',
+                  'Unique Advantages',
+                  'Internal Resources',
+                  'Market Position',
+                ],
+              },
+              {
+                title: '🔍 Weaknesses',
+                children: [
+                  'Areas for Improvement',
+                  'Resource Gaps',
+                  'Process Issues',
+                  'Competitive Disadvantages',
+                ],
+              },
+              {
+                title: '🚀 Opportunities',
+                children: [
+                  'Market Trends',
+                  'Partnership Potential',
+                  'Technology Advances',
+                  'Expansion Possibilities',
+                ],
+              },
+              {
+                title: '⚠️ Threats',
+                children: [
+                  'Competitive Risks',
+                  'Market Changes',
+                  'Regulatory Issues',
+                  'Economic Factors',
+                ],
+              },
+            ],
+          },
+        },
+        'mind-map-starter': {
+          name: 'Mind Map Starter',
+          structure: {
+            root: 'Central Topic',
+            sections: [
+              {
+                title: '🌟 Key Concepts',
+                children: ['Main Ideas', 'Core Principles', 'Important Facts', 'Key Questions'],
+              },
+              {
+                title: '🔗 Connections',
+                children: [
+                  'Related Topics',
+                  'Associated Ideas',
+                  'Cross-references',
+                  'Applications',
+                ],
+              },
+              {
+                title: '📝 Details',
+                children: ['Supporting Information', 'Examples', 'Evidence', 'Explanations'],
+              },
+              {
+                title: '🤔 Reflections',
+                children: [
+                  'Personal Thoughts',
+                  'Questions to Explore',
+                  'Areas for Research',
+                  'Action Items',
+                ],
+              },
+            ],
+          },
+        },
+        'goal-planning': {
+          name: 'Goal Achievement',
+          structure: {
+            root: 'Goal Setting',
+            sections: [
+              {
+                title: '🎯 Vision',
+                children: [
+                  'Long-term Goals',
+                  'Life Vision',
+                  'Ultimate Objectives',
+                  'Dream Outcomes',
+                ],
+              },
+              {
+                title: '📋 Strategy',
+                children: [
+                  'Action Plans',
+                  'Resource Requirements',
+                  'Timeline Planning',
+                  'Milestone Setting',
+                ],
+              },
+              {
+                title: '💪 Motivation',
+                children: [
+                  'Why Important',
+                  'Personal Drivers',
+                  'Inspiration Sources',
+                  'Accountability Partners',
+                ],
+              },
+              {
+                title: '📊 Tracking',
+                children: [
+                  'Progress Metrics',
+                  'Check-in Schedule',
+                  'Adjustment Points',
+                  'Success Indicators',
+                ],
+              },
+            ],
+          },
+        },
+      }
 
+      const templateData = templates[template]
+      if (!templateData) return
+
+      const { root, sections } = templateData.structure
       const created: Node[] = []
       const createdEdges: Edge[] = []
 
-      const root = createNode({ position: { x: centerX, y: centerY }, data: { label: rootLabel, editing: false } })
-      created.push(root)
+      // Create root node with better styling
+      const rootNode = createNode({
+        position: { x: 0, y: 0 },
+        data: {
+          label: root,
+          editing: false,
+          fontSize: 20,
+          color: '#f0f9ff',
+          shape: 'rounded',
+        },
+      })
+      created.push(rootNode)
 
-      topics.forEach((t, i) => {
-        const angle = (i / topics.length) * Math.PI * 2
-        const x = centerX + Math.cos(angle) * radius
-        const y = centerY + Math.sin(angle) * radius
-        const node = createNode({ position: { x, y }, data: { label: t, editing: false } })
-        created.push(node)
-        createdEdges.push({ id: `te_${Date.now()}_${i}`, source: root.id, target: node.id, type: 'smoothstep' })
+      // Layout sections in a grid with better spacing
+      const sectionsPerRow = 3
+      const sectionSpacing = 350 // Increased from 200
+      const childSpacing = 100 // Increased from 80
+      const childOffsetX = 300 // Increased from 250
+
+      sections.forEach((section, sectionIndex) => {
+        const row = Math.floor(sectionIndex / sectionsPerRow)
+        const col = sectionIndex % sectionsPerRow
+
+        const sectionX = (col - 1) * sectionSpacing
+        const sectionY = (row - 0.5) * sectionSpacing
+
+        const sectionNode = createNode({
+          position: { x: sectionX, y: sectionY },
+          data: {
+            label: section.title,
+            editing: false,
+            fontSize: 16,
+            color: '#fef3c7',
+            shape: 'rounded',
+          },
+        })
+        created.push(sectionNode)
+        createdEdges.push({
+          id: `edge_${Date.now()}_${sectionIndex}`,
+          source: rootNode.id,
+          target: sectionNode.id,
+          type: 'smoothstep',
+        })
+
+        // Add children in a column with better spacing
+        const childrenCount = section.children.length
+        const totalChildHeight = (childrenCount - 1) * childSpacing
+        const startY = sectionY - totalChildHeight / 2
+
+        section.children.forEach((child, childIndex) => {
+          const childNode = createNode({
+            position: {
+              x: sectionX + childOffsetX,
+              y: startY + childIndex * childSpacing,
+            },
+            data: {
+              label: child,
+              editing: false,
+              fontSize: 14,
+              color: '#e5e7eb',
+              shape: 'ellipse',
+            },
+          })
+          created.push(childNode)
+          createdEdges.push({
+            id: `edge_${Date.now()}_${sectionIndex}_${childIndex}`,
+            source: sectionNode.id,
+            target: childNode.id,
+            type: 'smoothstep',
+          })
+        })
       })
 
-      // A couple of sensible sub-nodes depending on template
-      const addSub = (parentLabel: string, labels: string[]) => {
-        const parent = created.find((n) => (n.data as any)?.label === parentLabel)
-        if (!parent) return
-        labels.forEach((lbl, idx) => {
-          const node = createNode({
-            position: { x: parent.position.x + 180, y: parent.position.y + idx * 90 - 45 },
-            data: { label: lbl, editing: false },
-          })
-          created.push(node)
-          createdEdges.push({ id: `te_sub_${Date.now()}_${lbl}` as string, source: parent.id, target: node.id, type: 'smoothstep' })
-        })
-      }
+      setNodes(cur => cur.map(n => ({ ...n, selected: false })).concat(created))
+      setEdges(cur => cur.concat(createdEdges))
 
-      if (template === 'school') {
-        addSub('Homework', ['Math', 'Science', 'History'])
-        addSub('Study Plan', ['Weekly Review', 'Exam Prep'])
-      } else {
-        addSub('Marketing', ['Content', 'Paid Ads'])
-        addSub('Product', ['Backlog', 'Bugs'])
-      }
-
-      setNodes((cur) => cur.map((n) => ({ ...n, selected: false })).concat(created))
-      setEdges((cur) => cur.concat(createdEdges))
-      // schedule tidy with current state on next tick
-      setTimeout(() => tidyLayout(nodes, edges.concat(createdEdges), setNodes), 0)
+      // Auto-arrange after creation with better spacing
+      setTimeout(() => {
+        const allNodes = [...nodes, ...created]
+        const allEdges = [...edges, ...createdEdges]
+        const incoming = new Set(allEdges.map(e => String(e.target)))
+        const rootForLayout = allNodes.find(n => !incoming.has(n.id)) ?? allNodes[0]
+        if (rootForLayout) {
+          const laidOut = hierarchicalLayout(rootForLayout.id, allNodes, allEdges)
+          setNodes(cur =>
+            cur.map(n => {
+              const next = laidOut.find(x => x.id === n.id)
+              return next ? { ...n, position: next.position } : n
+            })
+          )
+        }
+      }, 150) // Slightly longer delay for smoother animation
     },
-    [createNode, edges, nodes, setEdges, setNodes],
+    [createNode, edges, nodes, setEdges, setNodes, hierarchicalLayout]
   )
+
+  // --- visibility helpers (focus/hoist and collapsed branches)
+  const buildChildrenMap = useCallback(() => {
+    const map = new Map<string, string[]>()
+    for (const e of edges) {
+      const src = String(e.source)
+      const tgt = String(e.target)
+      if (!map.has(src)) map.set(src, [])
+      map.get(src)!.push(tgt)
+    }
+    return map
+  }, [edges])
+
+  const getSubtreeIds = useCallback(
+    (rootId: string): Set<string> => {
+      const map = buildChildrenMap()
+      const out = new Set<string>()
+      const q = [rootId]
+      while (q.length) {
+        const cur = q.shift() as string
+        if (out.has(cur)) continue
+        out.add(cur)
+        const kids = map.get(cur) ?? []
+        for (const k of kids) q.push(k)
+      }
+      return out
+    },
+    [buildChildrenMap]
+  )
+
+  const collapsedHiddenIds = useMemo(() => {
+    const hidden = new Set<string>()
+    for (const n of nodes) {
+      if ((n.data as NodeData)?.collapsed) {
+        const sub = getSubtreeIds(n.id)
+        sub.delete(n.id)
+        sub.forEach(id => hidden.add(id))
+      }
+    }
+    return hidden
+  }, [getSubtreeIds, nodes])
+
+  const focusVisibleIds = useMemo(() => {
+    if (!focusRootId) return null
+    return getSubtreeIds(focusRootId)
+  }, [focusRootId, getSubtreeIds])
+
+  const viewNodes = useMemo(() => {
+    const isVisible = (id: string) => {
+      if (collapsedHiddenIds.has(id)) return false
+      if (focusVisibleIds) return focusVisibleIds.has(id)
+      return true
+    }
+    return nodes.filter(n => isVisible(n.id))
+  }, [collapsedHiddenIds, focusVisibleIds, nodes])
+
+  const viewNodeIds = useMemo(() => new Set(viewNodes.map(n => n.id)), [viewNodes])
+
+  const viewEdges = useMemo(() => {
+    return edges.filter(e => viewNodeIds.has(String(e.source)) && viewNodeIds.has(String(e.target)))
+  }, [edges, viewNodeIds])
+
+  // --- layouts
+  const applyRadialLayout = useCallback(() => {
+    const incoming = new Set(edges.map(e => String(e.target)))
+    const root = nodes.find(n => !incoming.has(n.id)) ?? nodes[0]
+    if (!root) return
+    const laidOut = radialLayout(root.id, nodes, edges)
+    setNodes(cur =>
+      cur.map(n => {
+        const next = laidOut.find(x => x.id === n.id)
+        return next ? { ...n, position: next.position } : n
+      })
+    )
+  }, [edges, nodes, setNodes])
+
+  const applyHierarchicalLayout = useCallback(() => {
+    let rootId = focusRootId ?? ''
+    if (!rootId) {
+      const incoming = new Set(edges.map(e => String(e.target)))
+      rootId = nodes.find(n => !incoming.has(n.id))?.id ?? nodes[0]?.id ?? ''
+    }
+    if (!rootId) return
+    const laidOut = hierarchicalLayout(rootId, nodes, edges)
+    setNodes(cur =>
+      cur.map(n => {
+        const next = laidOut.find(x => x.id === n.id)
+        return next ? { ...n, position: next.position } : n
+      })
+    )
+  }, [edges, focusRootId, hierarchicalLayout, nodes, setNodes])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -484,18 +1269,14 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
           <span>Atlas Boards</span>
         </div>
         <div className="flex-1 px-4">
-          <input
-            className="title-input"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-          />
+          <input className="title-input" value={title} onChange={e => setTitle(e.target.value)} />
         </div>
         <div className="toolbar-group">
           {/* Dropdown: Insert */}
           <div className="relative">
             <button
               className="toolbar-btn"
-              onClick={(e) => {
+              onClick={e => {
                 const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
                 setMenuPos({ x: r.left, y: r.bottom + 8 })
                 setOpenMenu(openMenu === 'insert' ? null : 'insert')
@@ -509,7 +1290,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
           <div className="relative">
             <button
               className="toolbar-btn"
-              onClick={(e) => {
+              onClick={e => {
                 const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
                 setMenuPos({ x: r.left, y: r.bottom + 8 })
                 setOpenMenu(openMenu === 'templates' ? null : 'templates')
@@ -524,7 +1305,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
           <div className="relative">
             <button
               className="toolbar-btn"
-              onClick={(e) => {
+              onClick={e => {
                 const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
                 setMenuPos({ x: r.left, y: r.bottom + 8 })
                 setOpenMenu(openMenu === 'file' ? null : 'file')
@@ -538,7 +1319,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
           <div className="relative">
             <button
               className="toolbar-btn"
-              onClick={(e) => {
+              onClick={e => {
                 const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
                 setMenuPos({ x: r.left, y: r.bottom + 8 })
                 setOpenMenu(openMenu === 'edit' ? null : 'edit')
@@ -548,23 +1329,51 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
             </button>
           </div>
 
+          {/* Dropdown: Layout */}
+          <div className="relative">
+            <button
+              className="toolbar-btn"
+              onClick={e => {
+                const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                setMenuPos({ x: r.left, y: r.bottom + 8 })
+                setOpenMenu(openMenu === 'layout' ? null : 'layout')
+              }}
+            >
+              Layout ▾
+            </button>
+          </div>
+
           {/* Search */}
           <div className="hidden items-center gap-2 md:flex">
             <span className="toolbar-sep" />
+            <button
+              className="toolbar-btn"
+              onClick={() => setShowSearch(true)}
+              title="Search (Ctrl/Cmd + K)"
+            >
+              🔍 Search
+            </button>
             <input
               className="rounded-md border px-2 py-1 text-sm"
               placeholder="Search nodes..."
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={(e) => {
+              onChange={e => setSearch(e.target.value)}
+              onKeyDown={e => {
                 if (e.key === 'Enter') {
                   const query = search.trim().toLowerCase()
                   if (!query) return
-                  const index = nodes.findIndex((n) => (typeof (n.data as any)?.label === 'string') && ((n.data as any).label as string).toLowerCase().includes(query))
+                  const index = nodes.findIndex(
+                    n =>
+                      typeof (n.data as NodeData)?.label === 'string' &&
+                      ((n.data as NodeData).label as string).toLowerCase().includes(query)
+                  )
                   if (index === -1) return
                   const node = nodes[index]
-                  setNodes((cur) => cur.map((n) => ({ ...n, selected: n.id === node.id })))
-                  rfInstance.current?.setCenter?.(node.position.x, node.position.y, { zoom: 1.2, duration: 500 })
+                  setNodes(cur => cur.map(n => ({ ...n, selected: n.id === node.id })))
+                  rfInstance.current?.setCenter?.(node.position.x, node.position.y, {
+                    zoom: 1.2,
+                    duration: 500,
+                  })
                 }
               }}
             />
@@ -572,15 +1381,19 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
 
           {/* Tasks/Tables */}
           <div className="ml-auto hidden items-center gap-2 md:flex">
-            <button className="toolbar-btn" onClick={() => onOpenTools?.('kanban')}>Tasks</button>
-            <button className="toolbar-btn" onClick={() => onOpenTools?.('tables')}>Tables</button>
+            <button className="toolbar-btn" onClick={() => onOpenTools?.('kanban')}>
+              Tasks
+            </button>
+            <button className="toolbar-btn" onClick={() => onOpenTools?.('tables')}>
+              Tables
+            </button>
           </div>
 
           {/* Dropdown: Help (mobile also contains search and links) */}
           <div className="relative ml-auto md:ml-0">
             <button
               className="toolbar-btn"
-              onClick={(e) => {
+              onClick={e => {
                 const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
                 setMenuPos({ x: r.left, y: r.bottom + 8 })
                 setOpenMenu(openMenu === 'help' ? null : 'help')
@@ -589,7 +1402,9 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
               Help ▾
             </button>
           </div>
-          <button className="toolbar-btn" onClick={tidyLayout}>Tidy</button>
+          <button className="toolbar-btn" onClick={tidyLayout}>
+            Tidy
+          </button>
         </div>
 
         {/* Floating Menu Portal */}
@@ -600,44 +1415,410 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
           >
             {openMenu === 'insert' && (
               <div className="flex flex-col gap-2">
-                <button className="toolbar-btn w-full justify-start" onClick={() => { setOpenMenu(null); onAddNode() }}>+ Node</button>
-                <button className="toolbar-btn w-full justify-start" onClick={() => { setOpenMenu(null); setNodes((cur) => cur.map((n) => ({ ...n, selected: false })).concat(createNode({ type: 'note', data: { text: 'Note', color: '#FEF08A', editing: true }, position: { x: 0, y: 0 } }))) }}>+ Note</button>
-                <button className="toolbar-btn w-full justify-start" onClick={() => { setOpenMenu(null); setNodes((cur) => cur.map((n) => ({ ...n, selected: false })).concat(createNode({ type: 'checklist', data: { items: [{ id: `${Date.now()}_1`, text: 'New item', done: false }] }, position: { x: 0, y: 0 } }))) }}>+ Checklist</button>
-                <button className="toolbar-btn w-full justify-start disabled:opacity-50" disabled={!selectedNode} onClick={() => { setOpenMenu(null); onAddChild() }}>+ Child (Tab)</button>
-                <button className="toolbar-btn w-full justify-start disabled:opacity-50" disabled={!selectedNode} onClick={() => { setOpenMenu(null); onAddSibling() }}>+ Sibling (Enter)</button>
+                <button
+                  className="toolbar-btn w-full justify-start"
+                  onClick={() => {
+                    setOpenMenu(null)
+                    onAddNode()
+                  }}
+                >
+                  + Node
+                </button>
+                <button
+                  className="toolbar-btn w-full justify-start"
+                  onClick={() => {
+                    setOpenMenu(null)
+                    setNodes(cur =>
+                      cur
+                        .map(n => ({ ...n, selected: false }))
+                        .concat(
+                          createNode({
+                            type: 'note',
+                            data: { text: 'Note', color: '#FEF08A', editing: true },
+                            position: { x: 0, y: 0 },
+                          })
+                        )
+                    )
+                  }}
+                >
+                  + Note
+                </button>
+                <button
+                  className="toolbar-btn w-full justify-start"
+                  onClick={() => {
+                    setOpenMenu(null)
+                    setNodes(cur =>
+                      cur
+                        .map(n => ({ ...n, selected: false }))
+                        .concat(
+                          createNode({
+                            type: 'checklist',
+                            data: {
+                              items: [{ id: `${Date.now()}_1`, text: 'New item', done: false }],
+                            },
+                            position: { x: 0, y: 0 },
+                          })
+                        )
+                    )
+                  }}
+                >
+                  + Checklist
+                </button>
+                <button
+                  className="toolbar-btn w-full justify-start"
+                  onClick={() => {
+                    setOpenMenu(null)
+                    setNodes(cur =>
+                      cur
+                        .map(n => ({ ...n, selected: false }))
+                        .concat(
+                          createNode({
+                            type: 'kanban',
+                            data: { columns: [] },
+                            position: { x: 0, y: 0 },
+                          })
+                        )
+                    )
+                  }}
+                >
+                  + Kanban Board
+                </button>
+                <button
+                  className="toolbar-btn w-full justify-start"
+                  onClick={() => {
+                    setOpenMenu(null)
+                    setNodes(cur =>
+                      cur
+                        .map(n => ({ ...n, selected: false }))
+                        .concat(
+                          createNode({
+                            type: 'timeline',
+                            data: { events: [] },
+                            position: { x: 0, y: 0 },
+                          })
+                        )
+                    )
+                  }}
+                >
+                  + Timeline
+                </button>
+                <button
+                  className="toolbar-btn w-full justify-start"
+                  onClick={() => {
+                    setOpenMenu(null)
+                    setNodes(cur =>
+                      cur
+                        .map(n => ({ ...n, selected: false }))
+                        .concat(
+                          createNode({
+                            type: 'matrix',
+                            data: {
+                              matrixData: {
+                                title: 'Decision Matrix',
+                                rows: ['Option A', 'Option B', 'Option C'],
+                                columns: ['Cost', 'Quality', 'Time', 'Risk'],
+                                cells: [],
+                              },
+                            },
+                            position: { x: 0, y: 0 },
+                          })
+                        )
+                    )
+                  }}
+                >
+                  + Decision Matrix
+                </button>
+                <button
+                  className="toolbar-btn w-full justify-start disabled:opacity-50"
+                  disabled={!selectedNode}
+                  onClick={() => {
+                    setOpenMenu(null)
+                    onAddChild()
+                  }}
+                >
+                  + Child (Tab)
+                </button>
+                <button
+                  className="toolbar-btn w-full justify-start disabled:opacity-50"
+                  disabled={!selectedNode}
+                  onClick={() => {
+                    setOpenMenu(null)
+                    onAddSibling()
+                  }}
+                >
+                  + Sibling (Enter)
+                </button>
               </div>
             )}
             {openMenu === 'templates' && (
-              <div className="flex flex-col gap-2">
-                <button className="toolbar-btn w-full justify-start" onClick={() => { setOpenMenu(null); insertTemplate('school') }}>School (preset)</button>
-                <button className="toolbar-btn w-full justify-start" onClick={() => { setOpenMenu(null); insertTemplate('business') }}>Business (preset)</button>
+              <div className="flex max-h-96 flex-col gap-2 overflow-y-auto">
+                <div className="mb-2 text-sm font-medium">🎨 Professional Templates</div>
+
+                <div className="space-y-1">
+                  <div className="mb-1 text-xs font-medium text-slate-600">
+                    📚 Academic & Learning
+                  </div>
+                  <button
+                    className="toolbar-btn w-full justify-start text-sm"
+                    onClick={() => {
+                      setOpenMenu(null)
+                      insertTemplate('school-organized')
+                    }}
+                  >
+                    🎓 Academic Hub
+                  </button>
+                  <button
+                    className="toolbar-btn w-full justify-start text-sm"
+                    onClick={() => {
+                      setOpenMenu(null)
+                      insertTemplate('knowledge-base')
+                    }}
+                  >
+                    🧠 Knowledge Base
+                  </button>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="mb-1 text-xs font-medium text-slate-600">
+                    💼 Business & Strategy
+                  </div>
+                  <button
+                    className="toolbar-btn w-full justify-start text-sm"
+                    onClick={() => {
+                      setOpenMenu(null)
+                      insertTemplate('business-structured')
+                    }}
+                  >
+                    🏢 Business Framework
+                  </button>
+                  <button
+                    className="toolbar-btn w-full justify-start text-sm"
+                    onClick={() => {
+                      setOpenMenu(null)
+                      insertTemplate('swot-analysis')
+                    }}
+                  >
+                    🔍 SWOT Analysis
+                  </button>
+                  <button
+                    className="toolbar-btn w-full justify-start text-sm"
+                    onClick={() => {
+                      setOpenMenu(null)
+                      insertTemplate('decision-tree')
+                    }}
+                  >
+                    🌳 Decision Framework
+                  </button>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="mb-1 text-xs font-medium text-slate-600">
+                    🚀 Project & Productivity
+                  </div>
+                  <button
+                    className="toolbar-btn w-full justify-start text-sm"
+                    onClick={() => {
+                      setOpenMenu(null)
+                      insertTemplate('project-management')
+                    }}
+                  >
+                    📋 Project Hub
+                  </button>
+                  <button
+                    className="toolbar-btn w-full justify-start text-sm"
+                    onClick={() => {
+                      setOpenMenu(null)
+                      insertTemplate('personal-productivity')
+                    }}
+                  >
+                    ⚡ Life Organization
+                  </button>
+                  <button
+                    className="toolbar-btn w-full justify-start text-sm"
+                    onClick={() => {
+                      setOpenMenu(null)
+                      insertTemplate('goal-planning')
+                    }}
+                  >
+                    🎯 Goal Achievement
+                  </button>
+                  <button
+                    className="toolbar-btn w-full justify-start text-sm"
+                    onClick={() => {
+                      setOpenMenu(null)
+                      insertTemplate('timeline')
+                    }}
+                  >
+                    📅 Timeline Planning
+                  </button>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="mb-1 text-xs font-medium text-slate-600">🌟 General Purpose</div>
+                  <button
+                    className="toolbar-btn w-full justify-start text-sm"
+                    onClick={() => {
+                      setOpenMenu(null)
+                      insertTemplate('mind-map-starter')
+                    }}
+                  >
+                    🗺️ Mind Map Starter
+                  </button>
+                </div>
+
                 <div className="toolbar-sep" />
-                <button className="toolbar-btn w-full justify-start" onClick={() => { setOpenMenu(null); void saveAsTemplate() }}>Save current as template</button>
-                {templates.length > 0 && <div className="text-xs mt-1 opacity-70 px-1">Saved templates</div>}
-                {templates.map((t) => (
+
+                <div className="space-y-1">
+                  <div className="mb-1 text-xs font-medium text-slate-600">💾 Your Templates</div>
+                  <button
+                    className="toolbar-btn w-full justify-start"
+                    onClick={() => {
+                      setOpenMenu(null)
+                      void saveAsTemplate()
+                    }}
+                  >
+                    💾 Save current as template
+                  </button>
+                  {templates.length > 0 &&
+                    templates.map(t => (
                   <div key={t.id} className="flex items-center gap-2">
-                    <button className="toolbar-btn flex-1 justify-start" onClick={() => { setOpenMenu(null); void applyTemplateReplace(t) }}>Apply (replace): {t.name}</button>
-                    <button className="toolbar-btn" onClick={async ()=>{ const name = prompt('Rename template', t.name)?.trim(); if(!name) return; await db.templates.put({ ...t, name }); void refreshTemplates() }}>Rename</button>
-                    <button className="toolbar-btn" onClick={async ()=>{ await db.templates.delete(t.id); void refreshTemplates() }}>Delete</button>
+                        <button
+                          className="toolbar-btn flex-1 justify-start text-sm"
+                          onClick={() => {
+                            setOpenMenu(null)
+                            void applyTemplateReplace(t)
+                          }}
+                        >
+                          📄 {t.name}
+                        </button>
+                        <button
+                          className="toolbar-btn text-xs"
+                          onClick={async () => {
+                            const name = prompt('Rename template', t.name)?.trim()
+                            if (!name) return
+                            await db.templates.put({ ...t, name })
+                            void refreshTemplates()
+                          }}
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          className="toolbar-btn text-xs"
+                          onClick={async () => {
+                            await db.templates.delete(t.id)
+                            void refreshTemplates()
+                          }}
+                        >
+                          🗑️
+                        </button>
                   </div>
                 ))}
+                </div>
+
                 <div className="toolbar-sep" />
-                <button className="toolbar-btn w-full justify-start disabled:opacity-50" disabled={!selectedNode} onClick={() => { setOpenMenu(null); void createTasksFromBranch() }}>Create Tasks from Branch</button>
+
+                <button
+                  className="toolbar-btn w-full justify-start disabled:opacity-50"
+                  disabled={!selectedNode}
+                  onClick={() => {
+                    setOpenMenu(null)
+                    void createTasksFromBranch()
+                  }}
+                >
+                  📋 Create Tasks from Branch
+                </button>
               </div>
             )}
             {openMenu === 'file' && (
               <div className="flex flex-col gap-2">
-                <button className="toolbar-btn w-full justify-start" onClick={async () => { setOpenMenu(null); const el = document.querySelector('.react-flow__renderer') as HTMLElement | null; if (!el) return; const dataUrl = await htmlToImage.toPng(el, { pixelRatio: 2 }); const link = document.createElement('a'); link.download = 'board.png'; link.href = dataUrl; link.click() }}>Export PNG</button>
-                <button className="toolbar-btn w-full justify-start" onClick={async () => { setOpenMenu(null); const payload = JSON.stringify({ nodes, edges }, null, 2); const blob = new Blob([payload], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'board.json'; a.click(); URL.revokeObjectURL(url) }}>Export JSON</button>
-                <label className="toolbar-btn w-full justify-start cursor-pointer">
+                <button
+                  className="toolbar-btn w-full justify-start"
+                  onClick={async () => {
+                    setOpenMenu(null)
+                    const el = document.querySelector('.react-flow__renderer') as HTMLElement | null
+                    if (!el) return
+                    const dataUrl = await htmlToImage.toPng(el, { pixelRatio: 2 })
+                    const link = document.createElement('a')
+                    link.download = 'board.png'
+                    link.href = dataUrl
+                    link.click()
+                  }}
+                >
+                  Export PNG
+                </button>
+                <button
+                  className="toolbar-btn w-full justify-start"
+                  onClick={async () => {
+                    setOpenMenu(null)
+                    const payload = JSON.stringify({ nodes, edges }, null, 2)
+                    const blob = new Blob([payload], { type: 'application/json' })
+                    const url = URL.createObjectURL(blob)
+                    const a = document.createElement('a')
+                    a.href = url
+                    a.download = 'board.json'
+                    a.click()
+                    URL.revokeObjectURL(url)
+                  }}
+                >
+                  Export JSON
+                </button>
+                <label className="toolbar-btn w-full cursor-pointer justify-start">
                   Import JSON
-                  <input type="file" accept="application/json" className="hidden" onChange={async (e) => { const file = e.target.files?.[0]; if (!file) return; const text = await file.text(); try { const parsed = JSON.parse(text) as { nodes: Node[]; edges: Edge[] }; setNodes(parsed.nodes.map((n) => ({ ...n, type: 'editable' }))); setEdges(parsed.edges.map((e) => ({ type: 'labeled', ...e }))); } catch (err) { console.error('Invalid JSON', err) } finally { setOpenMenu(null) } }} />
+                  <input
+                    type="file"
+                    accept="application/json"
+                    className="hidden"
+                    onChange={async e => {
+                      const file = e.target.files?.[0]
+                      if (!file) return
+                      const text = await file.text()
+                      try {
+                        const parsed = JSON.parse(text) as { nodes: Node[]; edges: Edge[] }
+                        setNodes(parsed.nodes.map(n => ({ ...n, type: 'editable' })))
+                        setEdges(parsed.edges.map(e => ({ type: 'labeled', ...e })))
+                      } catch (err) {
+                        console.error('Invalid JSON', err)
+                      } finally {
+                        setOpenMenu(null)
+                      }
+                    }}
+                  />
                 </label>
               </div>
             )}
             {openMenu === 'edit' && (
               <div className="flex flex-col gap-2">
-                <button className="toolbar-btn w-full justify-start" onClick={() => { setOpenMenu(null); onDeleteSelected() }}>Delete (Del)</button>
+                <button
+                  className="toolbar-btn w-full justify-start"
+                  onClick={() => {
+                    setOpenMenu(null)
+                    onDeleteSelected()
+                  }}
+                >
+                  Delete (Del)
+                </button>
+              </div>
+            )}
+            {openMenu === 'layout' && (
+              <div className="flex flex-col gap-2">
+                <button
+                  className="toolbar-btn w-full justify-start"
+                  onClick={() => {
+                    setOpenMenu(null)
+                    applyRadialLayout()
+                  }}
+                >
+                  Radial
+                </button>
+                <button
+                  className="toolbar-btn w-full justify-start"
+                  onClick={() => {
+                    setOpenMenu(null)
+                    applyHierarchicalLayout()
+                  }}
+                >
+                  Hierarchical
+                </button>
               </div>
             )}
             {openMenu === 'help' && (
@@ -652,10 +1833,50 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
                 </ul>
                 <div className="md:hidden">
                   <div className="mb-1 font-medium">Search</div>
-                  <input className="mb-2 w-full rounded-md border px-2 py-1" placeholder="Search nodes..." value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { const query = search.trim().toLowerCase(); if (!query) return; const index = nodes.findIndex((n) => (typeof (n.data as any)?.label === 'string') && ((n.data as any).label as string).toLowerCase().includes(query)); if (index === -1) return; const node = nodes[index]; setNodes((cur) => cur.map((n) => ({ ...n, selected: n.id === node.id }))); rfInstance.current?.setCenter?.(node.position.x, node.position.y, { zoom: 1.2, duration: 500 }); setOpenMenu(null) } }} />
+                  <input
+                    className="mb-2 w-full rounded-md border px-2 py-1"
+                    placeholder="Search nodes..."
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        const query = search.trim().toLowerCase()
+                        if (!query) return
+                        const index = nodes.findIndex(
+                          n =>
+                            typeof (n.data as any)?.label === 'string' &&
+                            ((n.data as any).label as string).toLowerCase().includes(query)
+                        )
+                        if (index === -1) return
+                        const node = nodes[index]
+                        setNodes(cur => cur.map(n => ({ ...n, selected: n.id === node.id })))
+                        rfInstance.current?.setCenter?.(node.position.x, node.position.y, {
+                          zoom: 1.2,
+                          duration: 500,
+                        })
+                        setOpenMenu(null)
+                      }
+                    }}
+                  />
                   <div className="flex items-center gap-2">
-                    <button className="toolbar-btn w-full" onClick={() => { setOpenMenu(null); onOpenTools?.('kanban') }}>Tasks</button>
-                    <button className="toolbar-btn w-full" onClick={() => { setOpenMenu(null); onOpenTools?.('tables') }}>Tables</button>
+                    <button
+                      className="toolbar-btn w-full"
+                      onClick={() => {
+                        setOpenMenu(null)
+                        onOpenTools?.('kanban')
+                      }}
+                    >
+                      Tasks
+                    </button>
+                    <button
+                      className="toolbar-btn w-full"
+                      onClick={() => {
+                        setOpenMenu(null)
+                        onOpenTools?.('tables')
+                      }}
+                    >
+                      Tables
+                    </button>
                   </div>
                 </div>
               </div>
@@ -667,59 +1888,154 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
 
       {/* Left vertical toolbar */}
       <div className={`leftbar ${showUI ? '' : 'hidden'}`}>
-        <button className="leftbar-btn" title="Zoom In" onClick={() => (document.querySelector('.react-flow') as any)?.__rf?.zoomIn?.()}>
+        <button
+          className="leftbar-btn"
+          title="Zoom In"
+          onClick={() => {
+            const reactFlowInstance = (document.querySelector('.react-flow') as any)?.__rf
+            reactFlowInstance?.zoomIn?.()
+          }}
+        >
           +
         </button>
-        <button className="leftbar-btn" title="Zoom Out" onClick={() => (document.querySelector('.react-flow') as any)?.__rf?.zoomOut?.()}>
+        <button
+          className="leftbar-btn"
+          title="Zoom Out"
+          onClick={() => {
+            const reactFlowInstance = (document.querySelector('.react-flow') as any)?.__rf
+            reactFlowInstance?.zoomOut?.()
+          }}
+        >
           −
         </button>
-        <button className="leftbar-btn" title="Fit View" onClick={() => (document.querySelector('.react-flow') as any)?.__rf?.fitView?.()}>⤢</button>
+        <button
+          className="leftbar-btn"
+          title="Fit View"
+          onClick={() => (document.querySelector('.react-flow') as any)?.__rf?.fitView?.()}
+        >
+          ⤢
+        </button>
         <div className="toolbar-sep" />
-        <button className="leftbar-btn" title="Toggle Minimap" onClick={() => setShowMinimap((v) => !v)}>MM</button>
-        <button className="leftbar-btn" title="Dark Mode" onClick={() => { setDark((v) => !v); document.documentElement.classList.toggle('dark')}}>🌓</button>
-        <button className="leftbar-btn" title="Present (hide UI)" onClick={() => setShowUI((v) => !v)}>👁️</button>
-        <button className={`leftbar-btn ${snapToGrid ? 'bg-neutral-100 dark:bg-neutral-700' : ''}`} title="Snap to grid" onClick={() => setSnapToGrid((v) => !v)}>#</button>
-        <button className="leftbar-btn" title="Quick Create (Q)" onClick={() => setShowPalette(true)}>⚡</button>
+        <button
+          className="leftbar-btn"
+          title="Toggle Minimap"
+          onClick={() => setShowMinimap(v => !v)}
+        >
+          MM
+        </button>
+        <button
+          className="leftbar-btn"
+          title="Dark Mode"
+          onClick={() => {
+            setDark(prev => {
+            const next = !prev
+            const root = document.documentElement
+            if (next) root.classList.add('dark')
+            else root.classList.remove('dark')
+              try {
+                localStorage.setItem('theme', next ? 'dark' : 'light')
+              } catch {}
+            return next
+          })
+          }}
+        >
+          🌓
+        </button>
+        <button
+          className="leftbar-btn"
+          title="Present (hide UI)"
+          onClick={() => setShowUI(v => !v)}
+        >
+          👁️
+        </button>
+        <button
+          className={`leftbar-btn ${snapToGrid ? 'bg-neutral-100 dark:bg-neutral-700' : ''}`}
+          title="Snap to grid"
+          onClick={() => setSnapToGrid(v => !v)}
+        >
+          #
+        </button>
+        <button
+          className="leftbar-btn"
+          title="Quick Create (Q)"
+          onClick={() => setShowPalette(true)}
+        >
+          ⚡
+        </button>
         <div className="toolbar-sep" />
-        <button className="leftbar-btn" title="Align Left" onClick={() => {
-          const selected = nodes.filter((n) => n.selected)
+        <button
+          className="leftbar-btn"
+          title="Align Left"
+          onClick={() => {
+            const selected = nodes.filter(n => n.selected)
           if (selected.length < 2) return
-          const x = Math.min(...selected.map((n) => n.position.x))
-          setNodes((cur) => cur.map((n) => (n.selected ? { ...n, position: { ...n.position, x } } : n)))
-        }}>⟸</button>
-        <button className="leftbar-btn" title="Align Top" onClick={() => {
-          const selected = nodes.filter((n) => n.selected)
+            const x = Math.min(...selected.map(n => n.position.x))
+            setNodes(cur =>
+              cur.map(n => (n.selected ? { ...n, position: { ...n.position, x } } : n))
+            )
+          }}
+        >
+          ⟸
+        </button>
+        <button
+          className="leftbar-btn"
+          title="Align Top"
+          onClick={() => {
+            const selected = nodes.filter(n => n.selected)
           if (selected.length < 2) return
-          const y = Math.min(...selected.map((n) => n.position.y))
-          setNodes((cur) => cur.map((n) => (n.selected ? { ...n, position: { ...n.position, y } } : n)))
-        }}>⟰</button>
-        <button className="leftbar-btn" title="Distribute Horiz" onClick={() => {
-          const selected = nodes.filter((n) => n.selected).sort((a,b) => a.position.x - b.position.x)
+            const y = Math.min(...selected.map(n => n.position.y))
+            setNodes(cur =>
+              cur.map(n => (n.selected ? { ...n, position: { ...n.position, y } } : n))
+            )
+          }}
+        >
+          ⟰
+        </button>
+        <button
+          className="leftbar-btn"
+          title="Distribute Horiz"
+          onClick={() => {
+            const selected = nodes
+              .filter(n => n.selected)
+              .sort((a, b) => a.position.x - b.position.x)
           if (selected.length < 3) return
           const minX = selected[0].position.x
           const maxX = selected[selected.length - 1].position.x
           const step = (maxX - minX) / (selected.length - 1)
-          setNodes((cur) => cur.map((n) => {
-            const idx = selected.findIndex((s) => s.id === n.id)
+            setNodes(cur =>
+              cur.map(n => {
+                const idx = selected.findIndex(s => s.id === n.id)
             if (idx === -1) return n
             return { ...n, position: { ...n.position, x: minX + step * idx } }
-          }))
-        }}>⇔</button>
+              })
+            )
+          }}
+        >
+          ⇔
+        </button>
       </div>
 
       {/* Right inspector - persistent even without selection */}
-      <div className={`absolute right-3 top-1/2 z-50 w-72 -translate-y-1/2 rounded-md border border-slate-200 bg-white p-3 shadow ${showUI ? '' : 'hidden'}`}>
+      <div
+        className={`absolute right-3 top-1/2 z-50 w-72 -translate-y-1/2 rounded-md border border-slate-200 bg-white p-3 shadow ${showUI ? '' : 'hidden'}`}
+      >
         <div className="mb-2 text-sm font-medium">Inspector</div>
         {selectedNode ? (
           <>
-          {'label' in (selectedNode.data as any) && (
+            {'label' in (selectedNode.data as NodeData) && (
             <div className="mb-2">
               <label className="block text-xs text-slate-600">Label</label>
               <input
                 className="w-full rounded border bg-white px-2 py-1 text-sm text-neutral-900 placeholder-neutral-400"
-                value={(selectedNode.data as any).label ?? ''}
-                onChange={(e) =>
-                  setNodes((nodes) => nodes.map((n) => (n.id === selectedNode.id ? { ...n, data: { ...n.data, label: e.target.value } } : n)))
+                  value={(selectedNode.data as NodeData).label ?? ''}
+                  onChange={e =>
+                    setNodes(nodes =>
+                      nodes.map(n =>
+                        n.id === selectedNode.id
+                          ? { ...n, data: { ...n.data, label: e.target.value } }
+                          : n
+                      )
+                    )
                 }
               />
             </div>
@@ -729,9 +2045,15 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
               <label className="block text-xs text-slate-600">Shape</label>
               <select
                 className="w-full rounded border bg-white px-2 py-1 text-sm text-neutral-900"
-                value={(selectedNode.data as any).shape ?? 'rect'}
-                onChange={(e) =>
-                  setNodes((nodes) => nodes.map((n) => (n.id === selectedNode.id ? { ...n, data: { ...n.data, shape: e.target.value } } : n)))
+                  value={(selectedNode.data as NodeData).shape ?? 'rect'}
+                  onChange={e =>
+                    setNodes(nodes =>
+                      nodes.map(n =>
+                        n.id === selectedNode.id
+                          ? { ...n, data: { ...n.data, shape: e.target.value } }
+                          : n
+                      )
+                    )
                 }
               >
                 <option value="rect">Rectangle</option>
@@ -746,12 +2068,16 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
               <input
                 type="number"
                 className="w-full rounded border bg-white px-2 py-1 text-sm text-neutral-900"
-                value={(selectedNode.data as any).fontSize ?? 16}
+                  value={(selectedNode.data as NodeData).fontSize ?? 16}
                 min={10}
                 max={48}
-                onChange={(e) =>
-                  setNodes((nodes) =>
-                    nodes.map((n) => (n.id === selectedNode.id ? { ...n, data: { ...n.data, fontSize: Number(e.target.value) } } : n)),
+                  onChange={e =>
+                    setNodes(nodes =>
+                      nodes.map(n =>
+                        n.id === selectedNode.id
+                          ? { ...n, data: { ...n.data, fontSize: Number(e.target.value) } }
+                          : n
+                      )
                   )
                 }
               />
@@ -762,9 +2088,15 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
             <input
               type="color"
               className="h-8 w-full cursor-pointer rounded border bg-white"
-              value={(selectedNode.data as any).color ?? '#ffffff'}
-              onChange={(e) =>
-                setNodes((nodes) => nodes.map((n) => (n.id === selectedNode.id ? { ...n, data: { ...n.data, color: e.target.value } } : n)))
+                value={(selectedNode.data as NodeData).color ?? '#ffffff'}
+                onChange={e =>
+                  setNodes(nodes =>
+                    nodes.map(n =>
+                      n.id === selectedNode.id
+                        ? { ...n, data: { ...n.data, color: e.target.value } }
+                        : n
+                    )
+                  )
               }
             />
           </div>
@@ -772,20 +2104,33 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
             <button
               className="rounded bg-slate-200 px-3 py-1"
               onClick={() =>
-                setNodes((nodes) =>
-                  nodes.concat({ ...selectedNode, id: `${selectedNode.id}-copy-${Math.floor(Math.random() * 1e6)}`, position: { x: selectedNode.position.x + 40, y: selectedNode.position.y + 40 }, selected: false }),
+                  setNodes(nodes =>
+                    nodes.concat({
+                      ...selectedNode,
+                      id: `${selectedNode.id}-copy-${Math.floor(Math.random() * 1e6)}`,
+                      position: {
+                        x: selectedNode.position.x + 40,
+                        y: selectedNode.position.y + 40,
+                      },
+                      selected: false,
+                    })
                 )
               }
             >
               Duplicate
             </button>
-            <button className="rounded bg-rose-600 px-3 py-1 text-white" onClick={onDeleteSelected}>
+              <button
+                className="rounded bg-rose-600 px-3 py-1 text-white"
+                onClick={onDeleteSelected}
+              >
               Delete
             </button>
           </div>
           <div className="mt-3 border-t pt-2 text-sm">
             <div className="mb-1 font-medium">Task Link</div>
-            <button className="toolbar-btn w-full justify-start" onClick={async ()=>{
+              <button
+                className="toolbar-btn w-full justify-start"
+                onClick={async () => {
               // create or open a task linked to this node
               const existing = await db.tasks.where('nodeId').equals(selectedNode.id).first()
               if (existing) {
@@ -793,48 +2138,229 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
                 return
               }
               const listId = (await db.lists.toArray())[0]?.id ?? `l_${Date.now()}`
-              if (!(await db.lists.get(listId))) await db.lists.put({ id: listId, workspaceId, title: 'General', sort: 1 })
-              const task: Task = { id: `t_${Date.now()}`, listId, title: String((selectedNode.data as any)?.label ?? 'New Task'), sort: Date.now(), status: 'not-started', nodeId: selectedNode.id }
+                  if (!(await db.lists.get(listId)))
+                    await db.lists.put({ id: listId, workspaceId, title: 'General', sort: 1 })
+                  const task: Task = {
+                    id: `t_${Date.now()}`,
+                    listId,
+                    title: String((selectedNode.data as NodeData)?.label ?? 'New Task'),
+                    sort: Date.now(),
+                    status: 'not-started',
+                    nodeId: selectedNode.id,
+                  }
               await db.tasks.put(task)
               emitOpenTask(task.id, 'list')
-            }}>
+                }}
+              >
               Create/Open linked task
             </button>
-            <button className="toolbar-btn w-full justify-start" onClick={async ()=>{
+              <button
+                className="toolbar-btn w-full justify-start"
+                onClick={async () => {
               const all = await db.tasks.toArray()
-              const q = prompt('Link to existing task (type part of the title):')?.toLowerCase().trim()
+                  const q = prompt('Link to existing task (type part of the title):')
+                    ?.toLowerCase()
+                    .trim()
               if (!q) return
               const match = all.find(t => t.title.toLowerCase().includes(q))
-              if (!match) { alert('No task found'); return }
+                  if (!match) {
+                    alert('No task found')
+                    return
+                  }
               await db.tasks.put({ ...match, nodeId: selectedNode.id })
               alert(`Linked to: ${match.title}`)
-            }}>
+                }}
+              >
               Link existing task
             </button>
+              <div className="mt-3">
+                <div className="mb-1 font-medium">References</div>
+                <div className="mb-2">
+                  <div className="mb-1 text-xs uppercase text-slate-500">Outbound</div>
+                  {(() => {
+                    const label = (selectedNode.data as NodeData)?.label as string | undefined
+                    const titles = label ? extractOutboundTitles(label) : []
+                    if (titles.length === 0)
+                      return <div className="text-xs text-slate-500">No links</div>
+                    return (
+                      <div className="space-y-1">
+                        {titles.map((t, i) => {
+                          const target = findNodeByTitle(t)
+                          return (
+                            <div key={`${t}-${i}`} className="flex items-center gap-2">
+                              <span className="flex-1 truncate">[[{t}]]</span>
+                              {target ? (
+                                <button
+                                  className="rounded bg-slate-200 px-2 py-0.5"
+                                  onClick={() => {
+                                    setNodes(cur =>
+                                      cur.map(n => ({ ...n, selected: n.id === target.id }))
+                                    )
+                                    rfInstance.current?.setCenter?.(
+                                      target.position.x,
+                                      target.position.y,
+                                      { zoom: 1.2, duration: 500 }
+                                    )
+                                  }}
+                                >
+                                  Open
+                                </button>
+                              ) : (
+                                <button
+                                  className="rounded bg-emerald-600 px-2 py-0.5 text-white"
+                                  onClick={() => createAndLinkFromSelection(t)}
+                                >
+                                  Create
+                                </button>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )
+                  })()}
+                </div>
+                <div>
+                  <div className="mb-1 text-xs uppercase text-slate-500">Backlinks</div>
+                  {(() => {
+                    const myTitle = (selectedNode.data as NodeData)?.label as string | undefined
+                    if (!myTitle) return <div className="text-xs text-slate-500">N/A</div>
+                    const refs = nodes.filter(n => {
+                      if (n.id === selectedNode.id) return false
+                      const lbl = (n.data as NodeData)?.label as string | undefined
+                      if (!lbl) return false
+                      const outs = extractOutboundTitles(lbl)
+                      return outs.includes(myTitle)
+                    })
+                    if (refs.length === 0)
+                      return <div className="text-xs text-slate-500">No backlinks</div>
+                    return (
+                      <div className="space-y-1">
+                        {refs.map(n => (
+                          <div key={n.id} className="flex items-center gap-2">
+                            <span className="flex-1 truncate">
+                              {(n.data as NodeData)?.label ?? n.id}
+                            </span>
+                            <button
+                              className="rounded bg-slate-200 px-2 py-0.5"
+                              onClick={() => {
+                                setNodes(cur => cur.map(x => ({ ...x, selected: x.id === n.id })))
+                                rfInstance.current?.setCenter?.(n.position.x, n.position.y, {
+                                  zoom: 1.2,
+                                  duration: 500,
+                                })
+                              }}
+                            >
+                              Open
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  })()}
+                </div>
+                <div className="mt-3 border-t pt-2 text-sm">
+                  <div className="mb-1 font-medium">Focus</div>
+                  <div className="flex gap-2">
+                    {focusRootId === selectedNode?.id ? (
+                      <button className="rounded bg-slate-200 px-3 py-1" onClick={() => setFocusRootId(null)}>
+                        Clear Focus
+                      </button>
+                    ) : (
+                      <button className="rounded bg-slate-200 px-3 py-1" onClick={() => setFocusRootId(selectedNode?.id || null)}>
+                        Focus Subtree
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
           </div>
           </>
         ) : (
           <div className="text-xs text-slate-500">
             No node selected.
             <div className="mt-2 flex flex-wrap gap-2">
-              <button className="toolbar-btn" onClick={onAddNode}>+ Node</button>
+              <button className="toolbar-btn" onClick={onAddNode}>
+                + Node
+              </button>
               <button
                 className="toolbar-btn"
                 onClick={() =>
-                  setNodes((cur) =>
+                  setNodes(cur =>
                     cur
-                      .map((n) => ({ ...n, selected: false }))
+                      .map(n => ({ ...n, selected: false }))
                       .concat(
                         createNode({
                           type: 'note',
                           data: { text: 'Note', color: '#FEF08A', editing: true },
                           position: { x: Math.random() * 400 - 200, y: Math.random() * 200 - 100 },
-                        }),
-                      ),
+                        })
+                      )
                   )
                 }
               >
                 + Note
+              </button>
+              <button
+                className="toolbar-btn"
+                onClick={() =>
+                  setNodes(cur =>
+                    cur
+                      .map(n => ({ ...n, selected: false }))
+                      .concat(
+                        createNode({
+                          type: 'kanban',
+                          data: { columns: [] },
+                          position: { x: Math.random() * 400 - 200, y: Math.random() * 200 - 100 },
+                        })
+                      )
+                  )
+                }
+              >
+                + Kanban
+              </button>
+              <button
+                className="toolbar-btn"
+                onClick={() =>
+                  setNodes(cur =>
+                    cur
+                      .map(n => ({ ...n, selected: false }))
+                      .concat(
+                        createNode({
+                          type: 'timeline',
+                          data: { events: [] },
+                          position: { x: Math.random() * 400 - 200, y: Math.random() * 200 - 100 },
+                        })
+                      )
+                  )
+                }
+              >
+                + Timeline
+              </button>
+              <button
+                className="toolbar-btn"
+                onClick={() =>
+                  setNodes(cur =>
+                    cur
+                      .map(n => ({ ...n, selected: false }))
+                      .concat(
+                        createNode({
+                          type: 'matrix',
+                          data: {
+                            matrixData: {
+                              title: 'Decision Matrix',
+                              rows: ['Option A', 'Option B', 'Option C'],
+                              columns: ['Cost', 'Quality', 'Time', 'Risk'],
+                              cells: [],
+                            },
+                          },
+                          position: { x: Math.random() * 400 - 200, y: Math.random() * 200 - 100 },
+                        })
+                      )
+                  )
+                }
+              >
+                + Matrix
               </button>
             </div>
           </div>
@@ -842,17 +2368,20 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
       </div>
 
       <ReactFlow
-        nodes={nodes}
-        edges={edges}
+        nodes={viewNodes}
+        edges={viewEdges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
-        onConnect={(params) => onConnect({ ...params, type: 'labeled', data: { label: '' } })}
+        onConnect={params => onConnect({ ...params, type: 'labeled', data: { label: '' } })}
         defaultEdgeOptions={{ type: 'labeled' }}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        onInit={(inst) => { (document.querySelector('.react-flow') as any).__rf = inst; rfInstance.current = inst }}
+        onInit={inst => {
+          ;(document.querySelector('.react-flow') as any).__rf = inst
+          rfInstance.current = inst
+        }}
         snapToGrid={snapToGrid}
-        snapGrid={[25,25]}
+        snapGrid={[25, 25]}
         fitView
       >
         {showMinimap && <MiniMap />}
@@ -866,20 +2395,157 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
         onClose={() => setShowPalette(false)}
         actions={[
           { key: 'topic', label: 'Topic Node', run: () => onAddNode() },
-          { key: 'note', label: 'Note', run: () => setNodes((cur) => cur.map((n) => ({ ...n, selected: false })).concat(createNode({ type: 'note', data: { text: 'Note', color: '#FEF08A', editing: true }, position: { x: 0, y: 0 } }))) },
-          { key: 'checklist', label: 'Checklist', run: () => setNodes((cur) => cur.map((n) => ({ ...n, selected: false })).concat(createNode({ type: 'checklist', data: { items: [{ id: `${Date.now()}_1`, text: 'New item', done: false }] }, position: { x: 0, y: 0 } }))) },
+          {
+            key: 'note',
+            label: 'Note',
+            run: () =>
+              setNodes(cur =>
+                cur
+                  .map(n => ({ ...n, selected: false }))
+                  .concat(
+                    createNode({
+                      type: 'note',
+                      data: { text: 'Note', color: '#FEF08A', editing: true },
+                      position: { x: 0, y: 0 },
+                    })
+                  )
+              ),
+          },
+          {
+            key: 'checklist',
+            label: 'Checklist',
+            run: () =>
+              setNodes(cur =>
+                cur
+                  .map(n => ({ ...n, selected: false }))
+                  .concat(
+                    createNode({
+                      type: 'checklist',
+                      data: { items: [{ id: `${Date.now()}_1`, text: 'New item', done: false }] },
+                      position: { x: 0, y: 0 },
+                    })
+                  )
+              ),
+          },
+          {
+            key: 'kanban',
+            label: 'Kanban Board',
+            run: () =>
+              setNodes(cur =>
+                cur
+                  .map(n => ({ ...n, selected: false }))
+                  .concat(
+                    createNode({ type: 'kanban', data: { columns: [] }, position: { x: 0, y: 0 } })
+                  )
+              ),
+          },
+          {
+            key: 'timeline',
+            label: 'Timeline',
+            run: () =>
+              setNodes(cur =>
+                cur
+                  .map(n => ({ ...n, selected: false }))
+                  .concat(
+                    createNode({ type: 'timeline', data: { events: [] }, position: { x: 0, y: 0 } })
+                  )
+              ),
+          },
+          {
+            key: 'matrix',
+            label: 'Decision Matrix',
+            run: () =>
+              setNodes(cur =>
+                cur
+                  .map(n => ({ ...n, selected: false }))
+                  .concat(
+                    createNode({
+                      type: 'matrix',
+                      data: {
+                        matrixData: {
+                          title: 'Decision Matrix',
+                          rows: ['Option A', 'Option B', 'Option C'],
+                          columns: ['Cost', 'Quality', 'Time', 'Risk'],
+                          cells: [],
+                        },
+                      },
+                      position: { x: 0, y: 0 },
+                    })
+                  )
+              ),
+          },
           { key: 'child', label: 'Child of Selection', hint: 'Tab', run: () => onAddChild() },
-          { key: 'sibling', label: 'Sibling of Selection', hint: 'Enter', run: () => onAddSibling() },
-          { key: 'attach_note', label: 'Attach Note to Selection', run: () => attachNodeToSelection('note', { text: 'Note', color: '#FEF08A', editing: true }) },
-          { key: 'attach_check', label: 'Attach Checklist to Selection', run: () => attachNodeToSelection('checklist', { items: [{ id: `${Date.now()}_1`, text: 'New item', done: false }] }) },
-          { key: 'tpl_school', label: 'Insert Template: School', run: () => insertTemplate('school') },
-          { key: 'tpl_business', label: 'Insert Template: Business', run: () => insertTemplate('business') },
+          {
+            key: 'sibling',
+            label: 'Sibling of Selection',
+            hint: 'Enter',
+            run: () => onAddSibling(),
+          },
+          {
+            key: 'attach_note',
+            label: 'Attach Note to Selection',
+            run: () =>
+              attachNodeToSelection('note', { text: 'Note', color: '#FEF08A', editing: true }),
+          },
+          {
+            key: 'attach_check',
+            label: 'Attach Checklist to Selection',
+            run: () =>
+              attachNodeToSelection('checklist', {
+                items: [{ id: `${Date.now()}_1`, text: 'New item', done: false }],
+              }),
+          },
+          {
+            key: 'tpl_academic',
+            label: '🎓 Academic Hub Template',
+            run: () => insertTemplate('school-organized'),
+          },
+          {
+            key: 'tpl_business',
+            label: '🏢 Business Framework Template',
+            run: () => insertTemplate('business-structured'),
+          },
+          {
+            key: 'tpl_project',
+            label: '📋 Project Hub Template',
+            run: () => insertTemplate('project-management'),
+          },
+          {
+            key: 'tpl_knowledge',
+            label: '🧠 Knowledge Base Template',
+            run: () => insertTemplate('knowledge-base'),
+          },
+          {
+            key: 'tpl_productivity',
+            label: '⚡ Life Organization Template',
+            run: () => insertTemplate('personal-productivity'),
+          },
+          {
+            key: 'tpl_swot',
+            label: '🔍 SWOT Analysis Template',
+            run: () => insertTemplate('swot-analysis'),
+          },
+          {
+            key: 'tpl_decision',
+            label: '🌳 Decision Framework Template',
+            run: () => insertTemplate('decision-tree'),
+          },
+          {
+            key: 'tpl_goals',
+            label: '🎯 Goal Achievement Template',
+            run: () => insertTemplate('goal-planning'),
+          },
         ]}
+      />
+
+      {/* Global Search Dialog */}
+      <SearchDialog
+        isOpen={showSearch}
+        onClose={() => setShowSearch(false)}
+        onSelectResult={handleSearchResult}
       />
     </div>
   )
 }
 
 export default BoardCanvas
-
-
