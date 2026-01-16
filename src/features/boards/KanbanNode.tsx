@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Handle, Position, type NodeProps, useReactFlow } from '@reactflow/core'
 import { NodeToolbar } from '@reactflow/node-toolbar'
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { searchService, type SearchResult } from '../lib/search'
 
 interface SearchDialogProps {

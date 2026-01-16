@@ -1,7 +1,7 @@
 export type OpenTaskDetail = { taskId: string; view?: 'list' | 'kanban' }
 
-export function emitOpenTask(taskId: string, view: 'list' | 'kanban' = 'list') {
-  const ev = new CustomEvent<OpenTaskDetail>('open-task', { detail: { taskId, view } })
+export function emitOpenTask(detail: OpenTaskDetail) {
+  const ev = new CustomEvent<OpenTaskDetail>('open-task', { detail })
   window.dispatchEvent(ev)
 }
 

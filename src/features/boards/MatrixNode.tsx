@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Handle, Position, type NodeProps, useReactFlow } from '@reactflow/core'
 import { NodeToolbar } from '@reactflow/node-toolbar'
 
@@ -84,12 +84,6 @@ export default function MatrixNode({ id, data, selected }: NodeProps) {
       columns: [...matrixData.columns, `Criteria ${matrixData.columns.length + 1}`],
       cells: matrixData.cells.map((row, rowIndex) => [...row, newColumn[rowIndex]]),
     })
-  }
-
-  const priorityColors = {
-    low: 'bg-red-100 text-red-800',
-    medium: 'bg-yellow-100 text-yellow-800',
-    high: 'bg-green-100 text-green-800',
   }
 
   return (

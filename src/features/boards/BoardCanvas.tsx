@@ -30,6 +30,7 @@ import { emitOpenTask, onOpenQuickPalette } from '../../lib/events'
 import { extractOutboundTitles } from '../../lib/links'
 import { SearchDialog } from '../../components/SearchDialog'
 import { searchService, type SearchResult } from '../../lib/search'
+import { WelcomeScreen } from '../../components/WelcomeScreen'
 
 // --- helpers for layout
 function radialLayout(rootId: string, nodes: Node[], edges: Edge[]): Node[] {
@@ -51,7 +52,7 @@ function radialLayout(rootId: string, nodes: Node[], edges: Edge[]): Node[] {
 			walk(kid, radius * 1.2)
 		})
 	}
-  walk(rootId, 280) // Increased radius for better spacing
+  walk(rootId, 450) // Increased radius for better spacing
   return nodes.map(n => (placed.has(n.id) ? { ...n, position: placed.get(n.id)! } : n))
 }
 
@@ -116,8 +117,8 @@ const hierarchicalLayout = (function () {
         }
       }
     }
-    const xStep = 280 // Increased horizontal spacing
-    const yStep = 140 // Increased vertical spacing
+    const xStep = 450 // Increased horizontal spacing
+    const yStep = 200 // Increased vertical spacing
     const positioned = new Map<string, { x: number; y: number }>()
     const maxLayer = Math.max(...Array.from(layers.keys()))
     for (let d = 0; d <= maxLayer; d++) {
@@ -217,6 +218,10 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
   const [title, setTitle] = useState('Untitled Board')
   const [focusRootId, setFocusRootId] = useState<string | null>(null)
   const [showSearch, setShowSearch] = useState(false)
+  const [showWelcome, setShowWelcome] = useState(() => {
+    // Show welcome screen if never shown before
+    return !localStorage.getItem('atlas-welcome-shown')
+  })
 
   // simple undo/redo history
   type Snapshot = { nodes: Node[]; edges: Edge[] }
@@ -310,7 +315,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
     const node = createNode({
       position: { x: Math.random() * 400 - 200, y: Math.random() * 200 - 100 },
     })
-    setNodes(cur => cur.map(n => ({ ...n, selected: false })).concat(node))
+    setNodes(cur => cur.map((n: any) => ({ ...n, selected: false })).concat(node) as any)
   }, [createNode, setNodes])
 
   const selectedNode = useMemo(() => nodes.find(n => n.selected), [nodes])
@@ -339,7 +344,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
         target: newNode.id,
         type: 'smoothstep',
       }
-      setNodes(cur => cur.map(n => ({ ...n, selected: n.id === newNode.id })).concat(newNode))
+      setNodes(cur => cur.map((n: any) => ({ ...n, selected: n.id === newNode.id })).concat(newNode) as any)
       setEdges(cur => cur.concat(newEdge))
       rfInstance.current?.setCenter?.(newNode.position.x, newNode.position.y, {
         zoom: 1.1,
@@ -365,7 +370,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
       target: newNode.id,
       type: 'smoothstep',
     }
-    setNodes(cur => cur.map(n => ({ ...n, selected: false })).concat(newNode))
+    setNodes(cur => cur.map((n: any) => ({ ...n, selected: false })).concat(newNode) as any)
     setEdges(cur => cur.concat(newEdge))
   }, [createNode, edges.length, selectedNode, setEdges, setNodes])
 
@@ -380,7 +385,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
       const newNode: Node = createNode({
       position: { x: selectedNode.position.x + 220, y: selectedNode.position.y },
     })
-    setNodes(cur => cur.map(n => ({ ...n, selected: false })).concat(newNode))
+    setNodes(cur => cur.map((n: any) => ({ ...n, selected: false })).concat(newNode) as any)
     if (incoming) {
       const newEdge: Edge = {
         id: `e${edges.length + 1}`,
@@ -443,7 +448,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
         target: newNode.id,
         type: 'smoothstep',
       }
-      setNodes(cur => cur.map(n => ({ ...n, selected: false })).concat(newNode))
+      setNodes(cur => cur.map((n: any) => ({ ...n, selected: false })).concat(newNode) as any)
       setEdges(cur => cur.concat(newEdge))
     },
     [createNode, edges.length, selectedNode, setEdges, setNodes]
@@ -557,6 +562,13 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
   const [showMinimap, setShowMinimap] = useState(true)
   const [showUI, setShowUI] = useState(true)
   const [snapToGrid, setSnapToGrid] = useState(true)
+  const [dark, setDark] = useState(() => {
+    try {
+      return localStorage.getItem('theme') === 'dark'
+    } catch {
+      return false
+    }
+  })
   const [search, setSearch] = useState('')
   const [showPalette, setShowPalette] = useState(false)
   const [openMenu, setOpenMenu] = useState<
@@ -567,6 +579,15 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
 	const [templates, setTemplates] = useState<BoardTemplate[]>([])
 
 	useEffect(() => onOpenQuickPalette(() => setShowPalette(true)), [])
+
+  useEffect(() => {
+    const root = document.documentElement
+    if (dark) root.classList.add('dark')
+    else root.classList.remove('dark')
+    try {
+      localStorage.setItem('theme', dark ? 'dark' : 'light')
+    } catch {}
+  }, [dark])
 
 	const refreshTemplates = useCallback(async () => {
 		const all = await db.templates.toArray()
@@ -649,6 +670,10 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
     | 'swot-analysis'
     | 'mind-map-starter'
     | 'goal-planning'
+    | 'life-dashboard'
+    | 'brain-dump'
+    | 'weekly-focus'
+    | 'youtube-content'
 
   const insertTemplate = useCallback(
     (template: TemplateId) => {
@@ -1058,6 +1083,115 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
             ],
           },
         },
+        // ADHD-Friendly Life Organization Templates
+        'life-dashboard': {
+          name: 'Life Dashboard',
+          structure: {
+            root: '🏠 My Life',
+            sections: [
+              {
+                title: '💼 Work',
+                children: ['Current Projects', 'Meetings', 'Deadlines', 'People'],
+              },
+              {
+                title: '📚 School',
+                children: ['Classes', 'Homework', 'Exams', 'Study Notes'],
+              },
+              {
+                title: '👨‍👩‍👧 Family',
+                children: ['Kids Activities', 'Family Events', 'Home Tasks', 'Quality Time'],
+              },
+              {
+                title: '🎬 YouTube',
+                children: ['Video Ideas', 'In Production', 'Upload Schedule', 'Analytics'],
+              },
+              {
+                title: '🌟 Personal',
+                children: ['Health', 'Hobbies', 'Learning', 'Relaxation'],
+              },
+              {
+                title: '💡 Ideas',
+                children: ['Brain Dump', 'Someday/Maybe', 'To Research', 'Inspiration'],
+              },
+            ],
+          },
+        },
+        'brain-dump': {
+          name: 'Brain Dump',
+          structure: {
+            root: '🧠 Brain Dump',
+            sections: [
+              {
+                title: '🔴 Urgent',
+                children: ['Do Today', 'Overdue', 'Blocking Others', 'Stressing Me'],
+              },
+              {
+                title: '🟡 This Week',
+                children: ['Must Do', 'Should Do', 'Want to Do', 'Waiting For'],
+              },
+              {
+                title: '🟢 Later',
+                children: ['Next Week', 'This Month', 'Someday', 'Maybe Never'],
+              },
+              {
+                title: '💭 Random Thoughts',
+                children: ['Ideas', 'Worries', 'Questions', 'Notes to Self'],
+              },
+            ],
+          },
+        },
+        'weekly-focus': {
+          name: 'Weekly Focus',
+          structure: {
+            root: '📆 This Week',
+            sections: [
+              {
+                title: '🎯 Top 3 Priorities',
+                children: ['Priority 1', 'Priority 2', 'Priority 3'],
+              },
+              {
+                title: '📅 Monday-Wednesday',
+                children: ['Morning Focus', 'Afternoon Tasks', 'Evening Wind-down'],
+              },
+              {
+                title: '📅 Thursday-Friday',
+                children: ['Morning Focus', 'Afternoon Tasks', 'Wrap Up Week'],
+              },
+              {
+                title: '🏖️ Weekend',
+                children: ['Family Time', 'Personal Projects', 'Rest & Recharge'],
+              },
+            ],
+          },
+        },
+        'youtube-content': {
+          name: 'YouTube Content',
+          structure: {
+            root: '🎬 YouTube',
+            sections: [
+              {
+                title: '💡 Ideas Backlog',
+                children: ['Video Ideas', 'Trending Topics', 'Audience Requests', 'Collaborations'],
+              },
+              {
+                title: '🎥 In Production',
+                children: ['Scripting', 'Filming', 'Editing', 'Thumbnails'],
+              },
+              {
+                title: '📤 Ready to Upload',
+                children: ['Final Review', 'SEO & Tags', 'Schedule', 'Promotion'],
+              },
+              {
+                title: '📊 Published',
+                children: ['This Week', 'This Month', 'Top Performers', 'Needs Improvement'],
+              },
+              {
+                title: '📈 Growth',
+                children: ['Analytics Review', 'Subscriber Goals', 'Revenue', 'Community'],
+              },
+            ],
+          },
+        },
       }
 
       const templateData = templates[template]
@@ -1077,14 +1211,15 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
           color: '#f0f9ff',
           shape: 'rounded',
         },
+        selected: false,
       })
       created.push(rootNode)
 
       // Layout sections in a grid with better spacing
       const sectionsPerRow = 3
-      const sectionSpacing = 350 // Increased from 200
-      const childSpacing = 100 // Increased from 80
-      const childOffsetX = 300 // Increased from 250
+      const sectionSpacing = 600 // Increased from 350
+      const childSpacing = 150 // Increased from 100
+      const childOffsetX = 400 // Increased from 300
 
       sections.forEach((section, sectionIndex) => {
         const row = Math.floor(sectionIndex / sectionsPerRow)
@@ -1102,6 +1237,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
             color: '#fef3c7',
             shape: 'rounded',
           },
+          selected: false,
         })
         created.push(sectionNode)
         createdEdges.push({
@@ -1129,6 +1265,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
               color: '#e5e7eb',
               shape: 'ellipse',
             },
+            selected: false,
           })
           created.push(childNode)
           createdEdges.push({
@@ -1140,7 +1277,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
         })
       })
 
-      setNodes(cur => cur.map(n => ({ ...n, selected: false })).concat(created))
+      setNodes(cur => cur.map((n: any) => ({ ...n, selected: false })).concat(created) as any)
       setEdges(cur => cur.concat(createdEdges))
 
       // Auto-arrange after creation with better spacing
@@ -1264,6 +1401,19 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
 
   return (
     <div className="relative" style={{ width: '100%', height: '100%' }}>
+      {/* Focus Mode Indicator */}
+      {focusRootId && (
+        <div className="focus-mode-indicator">
+          <span>🎯 Focus Mode</span>
+          <span style={{ opacity: 0.8, fontWeight: 400 }}>
+            {nodes.find(n => n.id === focusRootId)?.data?.label as string || 'Selected Branch'}
+          </span>
+          <button onClick={() => setFocusRootId(null)} title="Exit Focus Mode">
+            ✕
+          </button>
+        </div>
+      )}
+      
       <div ref={topbarRef} className={`topbar ${showUI ? '' : 'hidden'}`}>
         <div className="brand">
           <span>Atlas Boards</span>
@@ -1369,7 +1519,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
                   )
                   if (index === -1) return
                   const node = nodes[index]
-                  setNodes(cur => cur.map(n => ({ ...n, selected: n.id === node.id })))
+                  setNodes(cur => cur.map((n: any) => ({ ...n, selected: n.id === node.id })) as any)
                   rfInstance.current?.setCenter?.(node.position.x, node.position.y, {
                     zoom: 1.2,
                     duration: 500,
@@ -1402,7 +1552,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
               Help ▾
             </button>
           </div>
-          <button className="toolbar-btn" onClick={tidyLayout}>
+          <button className="toolbar-btn" onClick={() => tidyLayout(nodes, edges, setNodes)}>
             Tidy
           </button>
         </div>
@@ -1430,14 +1580,14 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
                     setOpenMenu(null)
                     setNodes(cur =>
                       cur
-                        .map(n => ({ ...n, selected: false }))
+                        .map((n: any) => ({ ...n, selected: false }))
                         .concat(
                           createNode({
                             type: 'note',
                             data: { text: 'Note', color: '#FEF08A', editing: true },
                             position: { x: 0, y: 0 },
-                          })
-                        )
+                          }) as any
+                        ) as any
                     )
                   }}
                 >
@@ -1457,8 +1607,8 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
                               items: [{ id: `${Date.now()}_1`, text: 'New item', done: false }],
                             },
                             position: { x: 0, y: 0 },
-                          })
-                        )
+                          }) as any
+                        ) as any
                     )
                   }}
                 >
@@ -1476,8 +1626,8 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
                             type: 'kanban',
                             data: { columns: [] },
                             position: { x: 0, y: 0 },
-                          })
-                        )
+                          }) as any
+                        ) as any
                     )
                   }}
                 >
@@ -1495,8 +1645,8 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
                             type: 'timeline',
                             data: { events: [] },
                             position: { x: 0, y: 0 },
-                          })
-                        )
+                          }) as any
+                        ) as any
                     )
                   }}
                 >
@@ -1521,8 +1671,8 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
                               },
                             },
                             position: { x: 0, y: 0 },
-                          })
-                        )
+                          }) as any
+                        ) as any
                     )
                   }}
                 >
@@ -1774,7 +1924,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
                       const text = await file.text()
                       try {
                         const parsed = JSON.parse(text) as { nodes: Node[]; edges: Edge[] }
-                        setNodes(parsed.nodes.map(n => ({ ...n, type: 'editable' })))
+                        setNodes(parsed.nodes.map(n => ({ ...n, type: 'editable', selected: n.selected ?? false })) as any)
                         setEdges(parsed.edges.map(e => ({ type: 'labeled', ...e })))
                       } catch (err) {
                         console.error('Invalid JSON', err)
@@ -1849,7 +1999,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
                         )
                         if (index === -1) return
                         const node = nodes[index]
-                        setNodes(cur => cur.map(n => ({ ...n, selected: n.id === node.id })))
+                        setNodes(cur => cur.map((n: any) => ({ ...n, selected: n.id === node.id })) as any)
                         rfInstance.current?.setCenter?.(node.position.x, node.position.y, {
                           zoom: 1.2,
                           duration: 500,
@@ -2034,7 +2184,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
                         n.id === selectedNode.id
                           ? { ...n, data: { ...n.data, label: e.target.value } }
                           : n
-                      )
+                      ) as any
                     )
                 }
               />
@@ -2052,7 +2202,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
                         n.id === selectedNode.id
                           ? { ...n, data: { ...n.data, shape: e.target.value } }
                           : n
-                      )
+                      ) as any
                     )
                 }
               >
@@ -2077,8 +2227,8 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
                         n.id === selectedNode.id
                           ? { ...n, data: { ...n.data, fontSize: Number(e.target.value) } }
                           : n
-                      )
-                  )
+                      ) as any
+                    )
                 }
               />
             </div>
@@ -2095,7 +2245,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
                       n.id === selectedNode.id
                         ? { ...n, data: { ...n.data, color: e.target.value } }
                         : n
-                    )
+                    ) as any
                   )
               }
             />
@@ -2134,7 +2284,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
               // create or open a task linked to this node
               const existing = await db.tasks.where('nodeId').equals(selectedNode.id).first()
               if (existing) {
-                emitOpenTask(existing.id, 'list')
+                emitOpenTask({ taskId: existing.id, view: 'list' })
                 return
               }
               const listId = (await db.lists.toArray())[0]?.id ?? `l_${Date.now()}`
@@ -2149,7 +2299,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
                     nodeId: selectedNode.id,
                   }
               await db.tasks.put(task)
-              emitOpenTask(task.id, 'list')
+              emitOpenTask({ taskId: task.id, view: 'list' })
                 }}
               >
               Create/Open linked task
@@ -2194,7 +2344,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
                                   className="rounded bg-slate-200 px-2 py-0.5"
                                   onClick={() => {
                                     setNodes(cur =>
-                                      cur.map(n => ({ ...n, selected: n.id === target.id }))
+                                      cur.map((n: any) => ({ ...n, selected: n.id === target.id })) as any
                                     )
                                     rfInstance.current?.setCenter?.(
                                       target.position.x,
@@ -2244,7 +2394,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
                             <button
                               className="rounded bg-slate-200 px-2 py-0.5"
                               onClick={() => {
-                                setNodes(cur => cur.map(x => ({ ...x, selected: x.id === n.id })))
+                                setNodes(cur => cur.map((x: any) => ({ ...x, selected: x.id === n.id })) as any)
                                 rfInstance.current?.setCenter?.(n.position.x, n.position.y, {
                                   zoom: 1.2,
                                   duration: 500,
@@ -2286,17 +2436,17 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
               <button
                 className="toolbar-btn"
                 onClick={() =>
-                  setNodes(cur =>
-                    cur
-                      .map(n => ({ ...n, selected: false }))
-                      .concat(
-                        createNode({
-                          type: 'note',
-                          data: { text: 'Note', color: '#FEF08A', editing: true },
-                          position: { x: Math.random() * 400 - 200, y: Math.random() * 200 - 100 },
-                        })
+                      setNodes(cur =>
+                        cur
+                          .map((n: any) => ({ ...n, selected: false }))
+                          .concat(
+                            createNode({
+                              type: 'note',
+                              data: { text: 'Note', color: '#FEF08A', editing: true },
+                              position: { x: Math.random() * 400 - 200, y: Math.random() * 200 - 100 },
+                            })
+                          ) as any
                       )
-                  )
                 }
               >
                 + Note
@@ -2304,17 +2454,17 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
               <button
                 className="toolbar-btn"
                 onClick={() =>
-                  setNodes(cur =>
-                    cur
-                      .map(n => ({ ...n, selected: false }))
-                      .concat(
-                        createNode({
-                          type: 'kanban',
-                          data: { columns: [] },
-                          position: { x: Math.random() * 400 - 200, y: Math.random() * 200 - 100 },
-                        })
+                      setNodes(cur =>
+                        cur
+                          .map((n: any) => ({ ...n, selected: false }))
+                          .concat(
+                            createNode({
+                              type: 'kanban',
+                              data: { columns: [] },
+                              position: { x: Math.random() * 400 - 200, y: Math.random() * 200 - 100 },
+                            })
+                          ) as any
                       )
-                  )
                 }
               >
                 + Kanban
@@ -2322,17 +2472,17 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
               <button
                 className="toolbar-btn"
                 onClick={() =>
-                  setNodes(cur =>
-                    cur
-                      .map(n => ({ ...n, selected: false }))
-                      .concat(
-                        createNode({
-                          type: 'timeline',
-                          data: { events: [] },
-                          position: { x: Math.random() * 400 - 200, y: Math.random() * 200 - 100 },
-                        })
+                      setNodes(cur =>
+                        cur
+                          .map((n: any) => ({ ...n, selected: false }))
+                          .concat(
+                            createNode({
+                              type: 'timeline',
+                              data: { events: [] },
+                              position: { x: Math.random() * 400 - 200, y: Math.random() * 200 - 100 },
+                            })
+                          ) as any
                       )
-                  )
                 }
               >
                 + Timeline
@@ -2340,24 +2490,24 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
               <button
                 className="toolbar-btn"
                 onClick={() =>
-                  setNodes(cur =>
-                    cur
-                      .map(n => ({ ...n, selected: false }))
-                      .concat(
-                        createNode({
-                          type: 'matrix',
-                          data: {
-                            matrixData: {
-                              title: 'Decision Matrix',
-                              rows: ['Option A', 'Option B', 'Option C'],
-                              columns: ['Cost', 'Quality', 'Time', 'Risk'],
-                              cells: [],
-                            },
-                          },
-                          position: { x: Math.random() * 400 - 200, y: Math.random() * 200 - 100 },
-                        })
+                      setNodes(cur =>
+                        cur
+                          .map((n: any) => ({ ...n, selected: false }))
+                          .concat(
+                            createNode({
+                              type: 'matrix',
+                              data: {
+                                matrixData: {
+                                  title: 'Decision Matrix',
+                                  rows: ['Option A', 'Option B', 'Option C'],
+                                  columns: ['Cost', 'Quality', 'Time', 'Risk'],
+                                  cells: [],
+                                },
+                              },
+                              position: { x: Math.random() * 400 - 200, y: Math.random() * 200 - 100 },
+                            })
+                          ) as any
                       )
-                  )
                 }
               >
                 + Matrix
@@ -2372,7 +2522,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
         edges={viewEdges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
-        onConnect={params => onConnect({ ...params, type: 'labeled', data: { label: '' } })}
+        onConnect={(params: any) => onConnect({ ...params, type: 'labeled', data: { label: '' } })}
         defaultEdgeOptions={{ type: 'labeled' }}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
@@ -2394,70 +2544,89 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
         open={showPalette}
         onClose={() => setShowPalette(false)}
         actions={[
-          { key: 'topic', label: 'Topic Node', run: () => onAddNode() },
+          // Nodes
+          { key: 'topic', label: 'Topic Node', icon: '🔷', category: 'Nodes', hint: 'Basic mind map node', run: () => onAddNode() },
+          { key: 'child', label: 'Add Child Node', icon: '↘️', category: 'Nodes', hint: 'Press Tab', run: () => onAddChild() },
+          { key: 'sibling', label: 'Add Sibling Node', icon: '➡️', category: 'Nodes', hint: 'Press Enter', run: () => onAddSibling() },
+          // Attachments
           {
             key: 'note',
-            label: 'Note',
+            label: 'Sticky Note',
+            icon: '📝',
+            category: 'Attachments',
+            hint: 'Add thoughts and ideas',
             run: () =>
               setNodes(cur =>
                 cur
-                  .map(n => ({ ...n, selected: false }))
+                  .map((n: any) => ({ ...n, selected: false }))
                   .concat(
                     createNode({
                       type: 'note',
                       data: { text: 'Note', color: '#FEF08A', editing: true },
                       position: { x: 0, y: 0 },
-                    })
-                  )
+                    }) as any
+                  ) as any
               ),
           },
           {
             key: 'checklist',
             label: 'Checklist',
+            icon: '✅',
+            category: 'Attachments',
+            hint: 'Track to-do items',
             run: () =>
               setNodes(cur =>
                 cur
-                  .map(n => ({ ...n, selected: false }))
+                  .map((n: any) => ({ ...n, selected: false }))
                   .concat(
                     createNode({
                       type: 'checklist',
                       data: { items: [{ id: `${Date.now()}_1`, text: 'New item', done: false }] },
                       position: { x: 0, y: 0 },
-                    })
-                  )
+                    }) as any
+                  ) as any
               ),
           },
           {
             key: 'kanban',
             label: 'Kanban Board',
+            icon: '📋',
+            category: 'Attachments',
+            hint: 'Visual task board',
             run: () =>
               setNodes(cur =>
                 cur
-                  .map(n => ({ ...n, selected: false }))
+                  .map((n: any) => ({ ...n, selected: false }))
                   .concat(
-                    createNode({ type: 'kanban', data: { columns: [] }, position: { x: 0, y: 0 } })
-                  )
+                    createNode({ type: 'kanban', data: { columns: [] }, position: { x: 0, y: 0 } }) as any
+                  ) as any
               ),
           },
           {
             key: 'timeline',
             label: 'Timeline',
+            icon: '📅',
+            category: 'Attachments',
+            hint: 'Schedule and deadlines',
             run: () =>
               setNodes(cur =>
                 cur
-                  .map(n => ({ ...n, selected: false }))
+                  .map((n: any) => ({ ...n, selected: false }))
                   .concat(
-                    createNode({ type: 'timeline', data: { events: [] }, position: { x: 0, y: 0 } })
-                  )
+                    createNode({ type: 'timeline', data: { events: [] }, position: { x: 0, y: 0 } }) as any
+                  ) as any
               ),
           },
           {
             key: 'matrix',
             label: 'Decision Matrix',
+            icon: '🎯',
+            category: 'Attachments',
+            hint: 'Compare options',
             run: () =>
               setNodes(cur =>
                 cur
-                  .map(n => ({ ...n, selected: false }))
+                  .map((n: any) => ({ ...n, selected: false }))
                   .concat(
                     createNode({
                       type: 'matrix',
@@ -2470,70 +2639,121 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
                         },
                       },
                       position: { x: 0, y: 0 },
-                    })
-                  )
+                    }) as any
+                  ) as any
               ),
-          },
-          { key: 'child', label: 'Child of Selection', hint: 'Tab', run: () => onAddChild() },
-          {
-            key: 'sibling',
-            label: 'Sibling of Selection',
-            hint: 'Enter',
-            run: () => onAddSibling(),
           },
           {
             key: 'attach_note',
-            label: 'Attach Note to Selection',
+            label: 'Attach Note to Selected',
+            icon: '📎',
+            category: 'Attachments',
+            hint: 'Link a note to current node',
             run: () =>
               attachNodeToSelection('note', { text: 'Note', color: '#FEF08A', editing: true }),
           },
           {
             key: 'attach_check',
-            label: 'Attach Checklist to Selection',
+            label: 'Attach Checklist to Selected',
+            icon: '🔗',
+            category: 'Attachments',
+            hint: 'Link a checklist to current node',
             run: () =>
               attachNodeToSelection('checklist', {
                 items: [{ id: `${Date.now()}_1`, text: 'New item', done: false }],
               }),
           },
+          // Templates - Life & ADHD Friendly
           {
-            key: 'tpl_academic',
-            label: '🎓 Academic Hub Template',
-            run: () => insertTemplate('school-organized'),
+            key: 'tpl_life_dashboard',
+            label: 'Life Dashboard',
+            icon: '🏠',
+            category: 'Templates',
+            hint: 'Central hub for all life areas',
+            run: () => insertTemplate('life-dashboard'),
           },
           {
-            key: 'tpl_business',
-            label: '🏢 Business Framework Template',
-            run: () => insertTemplate('business-structured'),
+            key: 'tpl_brain_dump',
+            label: 'Brain Dump',
+            icon: '🧠',
+            category: 'Templates',
+            hint: 'Get everything out of your head',
+            run: () => insertTemplate('brain-dump'),
           },
           {
-            key: 'tpl_project',
-            label: '📋 Project Hub Template',
-            run: () => insertTemplate('project-management'),
-          },
-          {
-            key: 'tpl_knowledge',
-            label: '🧠 Knowledge Base Template',
-            run: () => insertTemplate('knowledge-base'),
+            key: 'tpl_weekly_focus',
+            label: 'Weekly Focus',
+            icon: '📆',
+            category: 'Templates',
+            hint: 'Plan your week simply',
+            run: () => insertTemplate('weekly-focus'),
           },
           {
             key: 'tpl_productivity',
-            label: '⚡ Life Organization Template',
+            label: 'Life Organization',
+            icon: '⚡',
+            category: 'Templates',
+            hint: 'Personal productivity system',
             run: () => insertTemplate('personal-productivity'),
           },
+          // Templates - Work & School
           {
-            key: 'tpl_swot',
-            label: '🔍 SWOT Analysis Template',
-            run: () => insertTemplate('swot-analysis'),
+            key: 'tpl_academic',
+            label: 'School & Homework',
+            icon: '📚',
+            category: 'Templates',
+            hint: 'Track classes and assignments',
+            run: () => insertTemplate('school-organized'),
+          },
+          {
+            key: 'tpl_project',
+            label: 'Project Hub',
+            icon: '💼',
+            category: 'Templates',
+            hint: 'Manage project tasks',
+            run: () => insertTemplate('project-management'),
+          },
+          {
+            key: 'tpl_youtube',
+            label: 'YouTube Content',
+            icon: '🎬',
+            category: 'Templates',
+            hint: 'Plan videos and content',
+            run: () => insertTemplate('youtube-content'),
+          },
+          // Templates - Decision & Planning
+          {
+            key: 'tpl_goals',
+            label: 'Goals & Vision',
+            icon: '🎯',
+            category: 'Templates',
+            hint: 'Long-term goal planning',
+            run: () => insertTemplate('goal-planning'),
           },
           {
             key: 'tpl_decision',
-            label: '🌳 Decision Framework Template',
+            label: 'Decision Framework',
+            icon: '🌳',
+            category: 'Templates',
+            hint: 'Make better decisions',
             run: () => insertTemplate('decision-tree'),
           },
+          // Navigation
           {
-            key: 'tpl_goals',
-            label: '🎯 Goal Achievement Template',
-            run: () => insertTemplate('goal-planning'),
+            key: 'nav_tasks',
+            label: 'Go to Tasks',
+            icon: '✓',
+            category: 'Navigation',
+            hint: 'View all tasks',
+            run: () => onOpenTools?.('kanban'),
+          },
+          {
+            key: 'nav_tables',
+            label: 'Go to Tables',
+            icon: '📊',
+            category: 'Navigation',
+            hint: 'View all tables',
+            run: () => onOpenTools?.('tables'),
           },
         ]}
       />
@@ -2544,6 +2764,39 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
         onClose={() => setShowSearch(false)}
         onSelectResult={handleSearchResult}
       />
+
+      {/* Welcome Screen */}
+      {showWelcome && (
+        <WelcomeScreen
+          onSelectTemplate={(templateId) => {
+            localStorage.setItem('atlas-welcome-shown', 'true')
+            setShowWelcome(false)
+            // Map welcome screen template IDs to our template system
+            const templateMap: Record<string, string> = {
+              'life-dashboard': 'life-dashboard',
+              'weekly-planner': 'weekly-focus',
+              'adhd-task-hub': 'brain-dump',
+              'work-projects': 'project-management',
+              'meeting-notes': 'knowledge-base',
+              'school-hub': 'school-organized',
+              'study-notes': 'knowledge-base',
+              'youtube-content': 'youtube-content',
+              'side-projects': 'project-management',
+              'family-life': 'life-dashboard',
+              'goals-vision': 'goal-planning',
+              'blank': '',
+            }
+            const mappedTemplate = templateMap[templateId]
+            if (mappedTemplate) {
+              setTimeout(() => insertTemplate(mappedTemplate as any), 100)
+            }
+          }}
+          onDismiss={() => {
+            localStorage.setItem('atlas-welcome-shown', 'true')
+            setShowWelcome(false)
+          }}
+        />
+      )}
     </div>
   )
 }

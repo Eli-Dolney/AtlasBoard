@@ -40,3 +40,25 @@ dist-ssr
 
 # Test coverage
 coverage
+
+# Browser-specific data (IndexedDB is browser-specific, but adding for safety)
+*.db
+*.sqlite
+*.sqlite3
+
+# OS-specific files
+Thumbs.db
+.DS_Store
+
+# Backup files
+*.backup
+*.bak
+*~
+
+# Personal data and secrets (extra safety)
+secrets.json
+config.local.json
+*.key
+*.pem
+*.p12
+*.pfx
