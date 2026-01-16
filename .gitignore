@@ -62,3 +62,10 @@ config.local.json
 *.pem
 *.p12
 *.pfx
+
+# Internal development documentation
+POLISH_GUIDE.md
+CHANGELOG.md
+DEVELOPMENT.md
+INTERNAL.md
+*.dev.md
