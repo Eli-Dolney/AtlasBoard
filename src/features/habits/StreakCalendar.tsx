@@ -140,7 +140,7 @@ export default function StreakCalendar({ workspaceId, habitId }: StreakCalendarP
         <div className="streak-weeks">
           {weeks.map((week, weekIndex) => (
             <div key={weekIndex} className="streak-week">
-              {week.map((day, dayIndex) => (
+              {week.map(day => (
                 <div
                   key={day.date}
                   className={`streak-day level-${day.level}`}

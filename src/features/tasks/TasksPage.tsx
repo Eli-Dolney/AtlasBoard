@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback } from 'react'
+import React, { useMemo, useState } from 'react'
 import Kanban from './Kanban'
 import { db, type Task, type TaskList } from '../../lib/db'
 import { onCreateTaskList, onOpenTask, emitOpenTask } from '../../lib/events'

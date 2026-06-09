@@ -433,7 +433,7 @@ function GoalModal({
                     type="button"
                     className={`goal-category-option ${category === cat.value ? 'active' : ''}`}
                     onClick={() => {
-                      setCategory(cat.value)
+                      setCategory(cat.value as Goal['category'])
                       if (!color) setColor(cat.color)
                     }}
                     style={{ 

@@ -158,7 +158,7 @@ export default function QuickPalette({ open, onClose, actions }: QuickPalettePro
                     {categoryIcons[category]} {category}
                   </div>
                   <div className="px-2 pb-2">
-                    {categoryActions.map((action, i) => {
+                    {categoryActions.map(action => {
                       const globalIndex = flatActions.findIndex(a => a.key === action.key)
                       const isSelected = globalIndex === selectedIndex
                       

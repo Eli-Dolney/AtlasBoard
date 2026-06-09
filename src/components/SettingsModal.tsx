@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react'
 import { db } from '../lib/db'
+import { applyTheme, getStoredTheme, type ThemePreference } from '../lib/theme'
 import 'dexie-export-import'
 
 interface SettingsModalProps {
@@ -10,7 +11,8 @@ interface SettingsModalProps {
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [isExporting, setIsExporting] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
-  const [activeTab, setActiveTab] = useState<'data' | 'about'>('data')
+  const [activeTab, setActiveTab] = useState<'data' | 'appearance' | 'about'>('data')
+  const [theme, setTheme] = useState<ThemePreference>(() => getStoredTheme())
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   if (!isOpen) return null
@@ -83,6 +85,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       await db.tableRows.clear()
       await db.templates.clear()
       await db.workspaces.clear()
+      await db.notes.clear()
+      await db.docs.clear()
+      await db.habits.clear()
+      await db.habitLogs.clear()
+      await db.goals.clear()
+      await db.milestones.clear()
+      await db.focusSessions.clear()
 
       // Clear the welcome shown flag
       localStorage.removeItem('atlas-welcome-shown')
@@ -119,6 +128,16 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             onClick={() => setActiveTab('data')}
           >
             📁 Data & Backup
+          </button>
+          <button
+            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'appearance'
+                ? 'border-[var(--brand-primary)] text-[var(--brand-primary)]'
+                : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+            }`}
+            onClick={() => setActiveTab('appearance')}
+          >
+            🎨 Appearance
           </button>
           <button
             className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
@@ -226,6 +245,41 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       Nothing is sent to any server. Your data stays on your device.
                     </p>
                   </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'appearance' && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="font-medium mb-2" style={{ color: 'var(--text-primary)' }}>
+                  Theme
+                </h3>
+                <p className="text-sm mb-4" style={{ color: 'var(--text-tertiary)' }}>
+                  Choose how Atlas Boards looks on your device.
+                </p>
+                <div className="theme-toggle-group">
+                  {(
+                    [
+                      { id: 'light' as const, label: 'Light', icon: '☀️' },
+                      { id: 'dark' as const, label: 'Dark', icon: '🌙' },
+                      { id: 'system' as const, label: 'System', icon: '💻' },
+                    ] as const
+                  ).map(opt => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      className={`theme-toggle-btn ${theme === opt.id ? 'active' : ''}`}
+                      onClick={() => {
+                        setTheme(opt.id)
+                        applyTheme(opt.id)
+                      }}
+                    >
+                      <span>{opt.icon}</span>
+                      <span>{opt.label}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>

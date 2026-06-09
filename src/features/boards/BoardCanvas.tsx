@@ -74,7 +74,7 @@ const tidyLayout = (function () {
     this: void,
     nodes: Node[],
     edges: Edge[],
-    setNodes: ReturnType<typeof useNodesState>[1]
+    setNodes: ReturnType<typeof useNodesState<NodeData>>[1]
   ) {
     const incoming = new Set(edges.map(e => e.target as string))
     const root = nodes.find(n => !incoming.has(n.id)) ?? nodes[0]
@@ -200,21 +200,16 @@ interface ChecklistItem {
 }
 
 export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, onOpenTools }) => {
-  const initialNodes = useMemo<Node[]>(
-    () => [
-    {
-      id: 'n1',
-      position: { x: 0, y: 0 },
-      data: { label: 'Central Idea' },
-      type: 'editable',
-    },
-    ],
-    []
-  )
-
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
+  // Start with empty nodes - will be populated from DB or with default after load
+  const [nodes, setNodes, onNodesChange] = useNodesState<NodeData>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge[]>([])
   const [loaded, setLoaded] = useState(false)
+  
+  // Refs to track current state for unmount save
+  const nodesRef = useRef<Node[]>([])
+  const edgesRef = useRef<Edge[]>([])
+  const titleRef = useRef('Untitled Board')
+  const loadedRef = useRef(false)
   const [title, setTitle] = useState('Untitled Board')
   const [focusRootId, setFocusRootId] = useState<string | null>(null)
   const [showSearch, setShowSearch] = useState(false)
@@ -229,7 +224,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
   const historyIndex = useRef<number>(-1)
   const isNavigatingHistory = useRef(false)
 
-  // Load board if exists
+  // Load board if exists, or create default node if new board
   useEffect(() => {
     void (async () => {
       const rec = await db.boards.get(boardId)
@@ -238,17 +233,48 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
           const parsed = JSON.parse(rec.data) as { nodes: Node[]; edges: Edge[] }
           const upgradedNodes: Node[] = parsed.nodes.map(n => ({
             ...n,
-            type: 'editable',
+            type: n.type || 'editable',
             data: { label: (n?.data as NodeData)?.label ?? 'New Node', ...(n.data as NodeData) },
           }))
           setNodes(upgradedNodes)
           setEdges(parsed.edges)
+          nodesRef.current = upgradedNodes
+          edgesRef.current = parsed.edges
         } catch {
-          // ignore malformed
+          // If malformed, create default node
+          const defaultNode: Node = {
+            id: 'n1',
+            position: { x: 0, y: 0 },
+            data: { label: 'Central Idea' },
+            type: 'editable',
+          }
+          setNodes([defaultNode])
+          nodesRef.current = [defaultNode]
         }
+      } else {
+        // No board exists - create default node
+        const defaultNode: Node = {
+          id: 'n1',
+          position: { x: 0, y: 0 },
+          data: { label: 'Central Idea' },
+          type: 'editable',
+        }
+        setNodes([defaultNode])
+        nodesRef.current = [defaultNode]
+        
+        // Save the new board immediately
+        await db.boards.put({
+          id: boardId,
+          workspaceId,
+          title: 'Untitled Board',
+          data: JSON.stringify({ nodes: [defaultNode], edges: [] }),
+          updatedAt: Date.now(),
+        })
       }
       setTitle(rec?.title ?? 'Untitled Board')
+      titleRef.current = rec?.title ?? 'Untitled Board'
       setLoaded(true)
+      loadedRef.current = true
 
       // Initialize search service
       try {
@@ -257,7 +283,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
         console.warn('Failed to initialize search service:', error)
       }
     })()
-  }, [boardId, setEdges, setNodes])
+  }, [boardId, setEdges, setNodes, workspaceId])
 
   const persist = useMemo(
     () =>
@@ -276,6 +302,10 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
 
   useEffect(() => {
     if (!loaded) return
+    // Update refs for unmount save
+    nodesRef.current = nodes
+    edgesRef.current = edges
+    
     persist(nodes, edges)
     // push into history unless we are applying a history snapshot
     if (isNavigatingHistory.current) return
@@ -288,6 +318,27 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
     history.current.push(snap)
     historyIndex.current = history.current.length - 1
   }, [nodes, edges, loaded, persist])
+
+  // Keep title ref in sync
+  useEffect(() => {
+    titleRef.current = title
+  }, [title])
+
+  // Save on unmount to ensure data is persisted when navigating away
+  useEffect(() => {
+    return () => {
+      if (!loadedRef.current) return
+      // Immediately save current state on unmount (bypass debounce)
+      const payload = JSON.stringify({ nodes: nodesRef.current, edges: edgesRef.current })
+      db.boards.put({
+        id: boardId,
+        workspaceId,
+        title: titleRef.current,
+        data: payload,
+        updatedAt: Date.now(),
+      }).catch(err => console.error('Failed to save board on unmount:', err))
+    }
+  }, [boardId, workspaceId])
 
   const onConnect = useCallback<OnConnect>(
     connection => {
@@ -477,6 +528,20 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
     )
   }, [edges, nodes])
 
+  // Select all nodes and edges
+  const onSelectAll = useCallback(() => {
+    setNodes(cur => cur.map(n => ({ ...n, selected: true })))
+    setEdges(cur => cur.map(e => ({ ...e, selected: true })))
+  }, [setNodes, setEdges])
+
+  // Delete all nodes and edges (with confirmation)
+  const onDeleteAll = useCallback(() => {
+    if (nodes.length === 0) return
+    if (!window.confirm(`Delete all ${nodes.length} nodes and edges? This cannot be undone.`)) return
+    setNodes([])
+    setEdges([])
+  }, [nodes.length, setNodes, setEdges])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const active = document.activeElement as HTMLElement | null
@@ -494,12 +559,20 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
 
       if (showSearch) return // Let search dialog handle its own keys
 
+      const isMod = e.metaKey || e.ctrlKey
+
+      // Select all (Cmd/Ctrl + A)
+      if (isMod && e.key.toLowerCase() === 'a') {
+        e.preventDefault()
+        onSelectAll()
+        return
+      }
+
       if (e.key === 'Backspace' || e.key === 'Delete') {
         e.preventDefault()
         onDeleteSelected()
         return
       }
-      const isMod = e.metaKey || e.ctrlKey
       if (isMod && e.key.toLowerCase() === 'z') {
         e.preventDefault()
         if (e.shiftKey) {
@@ -556,7 +629,7 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onAddChild, onAddSibling, onDeleteSelected, showSearch])
+  }, [onAddChild, onAddSibling, onDeleteSelected, onSelectAll, showSearch])
 
   const rfInstance = useRef<any>(null)
   const [showMinimap, setShowMinimap] = useState(true)
@@ -1942,10 +2015,29 @@ export const BoardCanvas: React.FC<BoardCanvasProps> = ({ boardId, workspaceId, 
                   className="toolbar-btn w-full justify-start"
                   onClick={() => {
                     setOpenMenu(null)
+                    onSelectAll()
+                  }}
+                >
+                  Select All (⌘A)
+                </button>
+                <button
+                  className="toolbar-btn w-full justify-start"
+                  onClick={() => {
+                    setOpenMenu(null)
                     onDeleteSelected()
                   }}
                 >
-                  Delete (Del)
+                  Delete Selected (Del)
+                </button>
+                <div className="toolbar-sep" />
+                <button
+                  className="toolbar-btn w-full justify-start text-rose-600"
+                  onClick={() => {
+                    setOpenMenu(null)
+                    onDeleteAll()
+                  }}
+                >
+                  Delete All Nodes
                 </button>
               </div>
             )}

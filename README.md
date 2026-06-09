@@ -1,10 +1,13 @@
-# 🌟 Atlas Boards - Next-Gen Local Productivity Hub
+# Atlas Boards — Premium Local Mind Map & Planner
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Live Demo](https://img.shields.io/badge/Live_Demo-GitHub_Pages-6366f1)](https://eli-dolney.github.io/AtlasBoard/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![React](https://img.shields.io/badge/React-20232A?logo=react&logoColor=61DAFB)](https://reactjs.org/)
 
-> **Privacy-First Trello/Miro/Notion Competitor** - Complete local workspace for mind mapping, notes, tasks, and knowledge management. Zero servers, full ownership.
+> **Free, privacy-first mind mapping + planner** — tasks, calendar, Kanban, habits, goals, notes, and docs. Everything stays in your browser. No account, no cloud.
+
+**[Try the live demo](https://eli-dolney.github.io/AtlasBoard/)** · **[Run locally](#-quick-start)** · MIT licensed
 
 ## 🚀 Overview
 
@@ -103,46 +106,49 @@ Atlas Boards is a powerful, local-only productivity workspace that combines the 
 - **Node relationships** across boards, tasks, notes, and docs
 - **Interactive exploration** of your workspace
 
-## 🛠️ Technical Stack
+## Technical Stack
 
-- **Frontend**: React 19 + TypeScript + Vite
-- **Styling**: Tailwind CSS 4.0 + PostCSS
-- **Canvas**: React Flow 11.x (mind mapping)
-- **Rich Text**: TipTap 3.x (advanced editor)
-- **Database**: Dexie (IndexedDB wrapper)
-- **Search**: MiniSearch (local full-text search)
-- **State**: Zustand (lightweight state management)
+- **Frontend**: React 19 + TypeScript + Vite 7
+- **Styling**: Tailwind CSS 4 + PostCSS design system
+- **Canvas**: React Flow 11 (mind mapping)
+- **Rich Text**: TipTap 2 (notes & docs)
+- **Database**: Dexie 4 (IndexedDB, 100% local)
+- **Search**: MiniSearch (full-text, offline)
+- **State**: React hooks + Dexie `useLiveQuery` + custom events
 
-## 🚀 Quick Start
+## Quick Start
 
-### Prerequisites
-- **Node.js 18+** and **npm**
+### Option A: Use instantly (no install)
 
-### Installation
+Open the **[live demo](https://eli-dolney.github.io/AtlasBoard/)** in your browser. Data is saved in that browser only (IndexedDB). Use **Settings → Export** to back up your workspace.
+
+### Option B: Run locally (recommended for daily use)
+
+**Prerequisites:** Node.js 18+ and npm
 
 ```bash
-# Clone the repository
 git clone https://github.com/Eli-Dolney/AtlasBoard.git
 cd AtlasBoard
-
-# Install dependencies
 npm install
-
-# Start development server
 npm run dev
 ```
 
-Open **http://localhost:5173** in your browser.
+Open **http://localhost:5173** — your planner, calendar, tasks, and mind maps persist across sessions at this URL.
 
-### Build for Production
+### Mac one-click launcher
+
+Double-click [`scripts/start-atlas.command`](scripts/start-atlas.command) in Finder. It installs dependencies on first run, starts the dev server, and opens the dashboard. Drag it to your Dock or add it to **Login Items** for daily use.
+
+> **Important:** Local data is tied to `http://localhost:5173`. The live demo and local app use separate storage. Use **Export/Import** in Settings to move data between them.
+
+### Build for production
 
 ```bash
-# Build optimized production bundle
 npm run build
-
-# Preview production build
 npm run preview
 ```
+
+GitHub Pages deploys automatically on push to `main` (see [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)).
 
 ## 🎯 Quick Start Guide
 
@@ -237,37 +243,13 @@ src/
 - **Local file handling** - Export/import your own data
 - **Full data ownership** - You control everything
 
-## 🚢 Deployment
+## Deployment
 
-### Static Hosting (Recommended)
+### GitHub Pages (included)
 
-Deploy the `dist/` folder to any static hosting service:
+Push to `main` and GitHub Actions builds with `GITHUB_PAGES=true` and deploys to Pages. The app uses hash routing (`#/dashboard`, `#/mind`, etc.) so deep links work without server config.
 
-```bash
-# Build for production
-npm run build
-
-# Deploy dist/ folder to:
-# - GitHub Pages
-# - Netlify
-# - Vercel
-# - Any static hosting service
-```
-
-### GitHub Pages Setup
-
-For GitHub Pages deployment under a subpath:
-
-```typescript
-// vite.config.ts
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-
-export default defineConfig({
-  plugins: [react()],
-  base: '/AtlasBoard/', // Match your repository name
-})
-```
+For other static hosts, run `npm run build` and upload `dist/`. Set `GITHUB_PAGES=true` when building if hosting under a subpath (see [`vite.config.ts`](vite.config.ts)).
 
 ## 🤝 Contributing
 

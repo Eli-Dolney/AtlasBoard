@@ -21,28 +21,28 @@ export default function GalleryView({ workspaceId, tableId, onRowClick }: Galler
   const [selectedTableId, setSelectedTableId] = useState<string | null>(tableId || null)
   const [searchQuery, setSearchQuery] = useState('')
   const [displayField, setDisplayField] = useState<string | null>(null)
-  const [coverField, setCoverField] = useState<string | null>(null)
+  const [coverField] = useState<string | null>(null)
 
   const tables = useLiveQuery(
     () => db.tableMetas.where('workspaceId').equals(workspaceId).toArray(),
     [workspaceId],
-    []
+    [] as TableMeta[]
   )
 
   const columns = useLiveQuery(
     () => selectedTableId 
       ? db.tableColumns.where('tableId').equals(selectedTableId).sortBy('sort')
-      : Promise.resolve([]),
+      : Promise.resolve([] as TableColumn[]),
     [selectedTableId],
-    []
+    [] as TableColumn[]
   )
 
   const rows = useLiveQuery(
     () => selectedTableId
       ? db.tableRows.where('tableId').equals(selectedTableId).sortBy('sort')
-      : Promise.resolve([]),
+      : Promise.resolve([] as TableRow[]),
     [selectedTableId],
-    []
+    [] as TableRow[]
   )
 
   // Auto-select first table
@@ -102,8 +102,6 @@ export default function GalleryView({ workspaceId, tableId, onRowClick }: Galler
   const getCardColor = (index: number) => {
     return CARD_COLORS[index % CARD_COLORS.length]
   }
-
-  const selectedTable = tables.find(t => t.id === selectedTableId)
 
   if (tables.length === 0) {
     return (

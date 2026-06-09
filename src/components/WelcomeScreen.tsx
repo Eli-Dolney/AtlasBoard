@@ -127,8 +127,11 @@ export function WelcomeScreen({ onSelectTemplate, onDismiss }: WelcomeScreenProp
   const filteredTemplates = templates.filter(t => t.category === selectedCategory)
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center" style={{ background: 'var(--bg-secondary)' }}>
-      <div className="w-full max-w-4xl mx-auto p-8">
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center welcome-overlay"
+      style={{ background: 'var(--bg-secondary)' }}
+    >
+      <div className="w-full max-w-4xl mx-auto p-8 welcome-panel">
         {/* Header */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-3 mb-4">
@@ -143,10 +146,10 @@ export function WelcomeScreen({ onSelectTemplate, onDismiss }: WelcomeScreenProp
             </h1>
           </div>
           <p className="text-lg" style={{ color: 'var(--text-secondary)' }}>
-            Your personal mind map & productivity hub
+            Premium mind mapping, planner, calendar & tasks — 100% free & local
           </p>
           <p className="text-sm mt-2" style={{ color: 'var(--text-tertiary)' }}>
-            All your data stays on your device. No cloud, no tracking.
+            Your data stays in this browser. No account, no cloud, no tracking.
           </p>
         </div>
 
@@ -241,7 +244,7 @@ export function WelcomeScreen({ onSelectTemplate, onDismiss }: WelcomeScreenProp
             style={{ color: 'var(--text-tertiary)' }}
             onClick={onDismiss}
           >
-            Skip and start with existing board
+            Continue to my workspace →
           </button>
         </div>
       </div>

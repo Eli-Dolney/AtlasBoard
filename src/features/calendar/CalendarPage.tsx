@@ -15,11 +15,6 @@ export default function CalendarPage({ workspaceId }: CalendarPageProps) {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
 
   const tasks = useLiveQuery(() => db.tasks.toArray(), [], [])
-  const lists = useLiveQuery(
-    () => db.lists.where('workspaceId').equals(workspaceId).toArray(),
-    [workspaceId],
-    []
-  )
 
   const year = cursor.getFullYear()
   const month = cursor.getMonth()

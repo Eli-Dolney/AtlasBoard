@@ -327,7 +327,6 @@ export default function DocsPage({ workspaceId }: DocsPageProps) {
                 key={selectedDoc.id}
                 content={selectedDoc.content}
                 onChange={handleContentChange}
-                placeholder="Start writing..."
               />
             </div>
 

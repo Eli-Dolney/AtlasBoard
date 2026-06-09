@@ -9,11 +9,10 @@ interface GanttViewProps {
 
 const DAY_WIDTH = 40
 const ROW_HEIGHT = 36
-const HEADER_HEIGHT = 60
 
 export default function GanttView({ workspaceId, onTaskClick }: GanttViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const [scrollLeft, setScrollLeft] = useState(0)
+  const [, setScrollLeft] = useState(0)
 
   const lists = useLiveQuery(
     () => db.lists.where('workspaceId').equals(workspaceId).sortBy('sort'),
@@ -35,7 +34,7 @@ export default function GanttView({ workspaceId, onTaskClick }: GanttViewProps) 
   }, [allTasks])
 
   // Calculate date range
-  const { startDate, endDate, totalDays, weeks } = useMemo(() => {
+  const { startDate, totalDays, weeks } = useMemo(() => {
     if (tasks.length === 0) {
       const today = new Date()
       today.setHours(0, 0, 0, 0)
@@ -159,7 +158,7 @@ export default function GanttView({ workspaceId, onTaskClick }: GanttViewProps) 
           <span>Tasks</span>
         </div>
         <div className="gantt-sidebar-tasks">
-          {tasks.map((task, index) => {
+          {tasks.map(task => {
             const list = lists.find(l => l.id === task.listId)
             return (
               <div

@@ -21,12 +21,6 @@ export default function DashboardPage({ workspaceId, onNavigate }: DashboardPage
 
   const tasks = useLiveQuery(() => db.tasks.toArray(), [], [])
 
-  const lists = useLiveQuery(
-    () => db.lists.where('workspaceId').equals(workspaceId).toArray(),
-    [workspaceId],
-    []
-  )
-
   const tables = useLiveQuery(
     () => db.tableMetas.where('workspaceId').equals(workspaceId).toArray(),
     [workspaceId],
@@ -253,6 +247,35 @@ export default function DashboardPage({ workspaceId, onNavigate }: DashboardPage
     },
   ]
 
+  const greeting = useMemo(() => {
+    const hour = new Date().getHours()
+    if (hour < 12) return 'Good morning'
+    if (hour < 17) return 'Good afternoon'
+    return 'Good evening'
+  }, [])
+
+  const todayTasks = useMemo(() => {
+    const start = new Date()
+    start.setHours(0, 0, 0, 0)
+    const end = new Date(start)
+    end.setDate(end.getDate() + 1)
+    return tasks
+      .filter(
+        t =>
+          t.status !== 'done' &&
+          t.dueAt &&
+          t.dueAt >= start.getTime() &&
+          t.dueAt < end.getTime()
+      )
+      .sort((a, b) => (a.dueAt ?? 0) - (b.dueAt ?? 0))
+  }, [tasks])
+
+  const overdueTasks = useMemo(() => {
+    const start = new Date()
+    start.setHours(0, 0, 0, 0)
+    return tasks.filter(t => t.status !== 'done' && t.dueAt && t.dueAt < start.getTime())
+  }, [tasks])
+
   // Quick stats for header
   const quickStats = [
     { label: 'Active Tasks', value: taskStats.activeTasks, color: '#3b82f6' },
@@ -267,9 +290,15 @@ export default function DashboardPage({ workspaceId, onNavigate }: DashboardPage
       {/* Header */}
       <div className="dashboard-header">
         <div className="dashboard-header-content">
-          <h1 className="dashboard-title">Welcome back</h1>
+          <h1 className="dashboard-title">{greeting}</h1>
           <p className="dashboard-subtitle">
-            Here's what's happening across your workspace
+            {new Date().toLocaleDateString(undefined, {
+              weekday: 'long',
+              month: 'long',
+              day: 'numeric',
+            })}
+            {' · '}
+            Your local planner & mind map workspace
           </p>
         </div>
         <button 
@@ -278,6 +307,71 @@ export default function DashboardPage({ workspaceId, onNavigate }: DashboardPage
         >
           🍅 Start Focus Session
         </button>
+      </div>
+
+      {/* Today snapshot */}
+      <div className="dashboard-today card">
+        <div className="dashboard-today-header">
+          <h2 className="dashboard-today-title">Today</h2>
+          <button className="btn btn-ghost btn-sm" onClick={() => onNavigate('calendar')}>
+            Open calendar →
+          </button>
+        </div>
+        {overdueTasks.length > 0 && (
+          <div className="dashboard-today-overdue">
+            <span className="dashboard-today-overdue-label">Overdue</span>
+            <ul className="dashboard-today-list">
+              {overdueTasks.slice(0, 3).map(t => (
+                <li key={t.id}>
+                  <button
+                    type="button"
+                    className="dashboard-today-task overdue"
+                    onClick={() => onNavigate('tasks')}
+                  >
+                    {t.title}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {todayTasks.length > 0 ? (
+          <ul className="dashboard-today-list">
+            {todayTasks.slice(0, 5).map(t => (
+              <li key={t.id}>
+                <button
+                  type="button"
+                  className="dashboard-today-task"
+                  onClick={() => onNavigate('tasks')}
+                >
+                  <span
+                    className={`priority-indicator priority-${t.priority || 'medium'}`}
+                    aria-hidden
+                  />
+                  {t.title}
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="dashboard-today-empty">
+            No tasks due today.{' '}
+            <button type="button" className="dashboard-today-link" onClick={() => onNavigate('tasks')}>
+              Add one in Tasks
+            </button>
+          </p>
+        )}
+        <div className="dashboard-today-actions">
+          <button className="btn btn-secondary btn-sm" onClick={() => onNavigate('mind')}>
+            Mind map
+          </button>
+          <button className="btn btn-secondary btn-sm" onClick={() => onNavigate('tasks')}>
+            Tasks
+          </button>
+          <button className="btn btn-secondary btn-sm" onClick={() => onNavigate('calendar')}>
+            Calendar
+          </button>
+        </div>
       </div>
 
       {/* Quick Stats */}

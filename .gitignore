@@ -68,4 +68,10 @@ POLISH_GUIDE.md
 CHANGELOG.md
 DEVELOPMENT.md
 INTERNAL.md
+planning.md
+PLAN.md
 *.dev.md
+*.plan.md
+
+# Cursor / IDE local files
+.cursor/

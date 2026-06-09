@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { db, type Task, type TaskList } from '../lib/db'
 import { useLiveQuery } from 'dexie-react-hooks'
 

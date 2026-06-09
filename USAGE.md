@@ -4,7 +4,7 @@ This guide covers all features of Atlas Boards and how to use them effectively.
 
 ## Table of Contents
 
-1. [Getting Started](#getting-started)
+1. [Getting Started](#getting-started) (includes [Daily Use on Mac](#daily-use-on-mac-recommended))
 2. [Dashboard](#dashboard)
 3. [Mind Mapping](#mind-mapping)
 4. [Task Management](#task-management)
@@ -29,6 +29,26 @@ This guide covers all features of Atlas Boards and how to use them effectively.
 2. **Start the app**: Run `npm run dev` and open http://localhost:5173
 3. **Welcome screen**: On first launch, you'll see a welcome screen with an overview
 4. **Dashboard**: The app opens to the Dashboard, your central hub
+
+### Daily Use on Mac (Recommended)
+
+Atlas Boards is designed to be your daily-driver productivity app. A start script is included so you can launch with one click every morning:
+
+1. **Double-click** `scripts/start-atlas.command` in Finder (or from your Dock)
+2. The script installs dependencies if needed, starts the dev server on port 5173, and opens your browser automatically
+3. All your mind maps, tasks, habits, goals, calendar entries, and notes from previous sessions are still there
+
+**Important rules for keeping your data intact:**
+
+- **Always use the same browser** (e.g. always Chrome, or always Safari). Each browser has its own separate IndexedDB database.
+- **Always use the same URL** — `http://localhost:5173`. The server port is pinned to 5173, so your data is always at the same browser origin. If you see an error about the port being in use, close the other Atlas Boards terminal first.
+- **Do not clear site data** for `localhost` in your browser settings — this deletes IndexedDB, which is where all your data lives.
+- **Do not use Private/Incognito mode** for daily use — some browsers limit or discard IndexedDB storage in private windows.
+- **Back up regularly** — go to Settings > Data & Backup > Export to download a JSON backup. Keep these files somewhere safe (iCloud, external drive, etc.).
+
+**Optional: Launch at login**
+
+Drag `scripts/start-atlas.command` into **System Settings > General > Login Items** to have Atlas Boards start automatically when you log into your Mac.
 
 ### Navigation
 
@@ -509,12 +529,21 @@ Export, import, and manage your data.
 5. **Confirm**: Confirm to overwrite current data
 6. **Reload**: App reloads with imported data
 
-### Data Safety
+### Data Safety & Persistence
 
-- **Local storage**: All data stored in browser's IndexedDB
-- **No cloud**: Data never leaves your device
-- **Backup regularly**: Export data regularly for safety
-- **Multiple backups**: Keep multiple backup files
+- **Automatic persistence**: All data is automatically saved to your browser's IndexedDB as you make changes
+- **Survives restarts**: Your data persists across browser sessions - close and reopen the app, and everything stays exactly as you left it
+- **No cloud required**: Data never leaves your device - everything is stored locally
+- **What persists**:
+  - Mind maps (nodes, edges, board settings)
+  - Tasks and task lists
+  - Habits and habit tracking logs
+  - Goals and milestones
+  - Notes and documents
+  - Calendar events
+  - All settings and preferences
+- **Backup regularly**: Export data regularly for extra safety
+- **Multiple backups**: Keep multiple backup files in different locations
 
 ### Reset Data
 
@@ -545,10 +574,16 @@ Export, import, and manage your data.
 |----------|--------|
 | `Tab` | Add child node |
 | `Enter` | Add sibling node |
+| `Ctrl/Cmd + A` | Select all nodes and edges |
 | `Delete/Backspace` | Delete selected nodes/edges |
 | `Ctrl/Cmd + Z` | Undo |
 | `Ctrl/Cmd + Shift + Z` | Redo |
 | `Escape` | Deselect all |
+
+**Edit Menu Options:**
+- **Select All**: Select all nodes and edges on the canvas
+- **Delete Selected**: Remove currently selected items
+- **Delete All Nodes**: Remove all nodes and edges (with confirmation)
 
 ### Editor Shortcuts
 
@@ -595,9 +630,11 @@ Export, import, and manage your data.
 
 ### Data Not Saving
 
-- **Check browser**: Ensure IndexedDB is enabled
-- **Storage space**: Check if browser storage is full
-- **Private mode**: Some browsers limit storage in private mode
+- **Check browser**: Ensure IndexedDB is enabled (required for persistence)
+- **Storage space**: Check if browser storage is full (IndexedDB typically has 50MB+ limit)
+- **Private mode**: Some browsers limit or disable IndexedDB in private/incognito mode
+- **Same browser**: Data is stored per-browser - use the same browser to see your data
+- **Clear cache warning**: Clearing browser data/cache will delete your IndexedDB data - export first!
 
 ### Performance Issues
 

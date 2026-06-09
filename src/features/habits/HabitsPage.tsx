@@ -449,7 +449,7 @@ function HabitModal({
                     key={time.value}
                     type="button"
                     className={`habit-time-option ${timeOfDay === time.value ? 'active' : ''}`}
-                    onClick={() => setTimeOfDay(time.value)}
+                    onClick={() => setTimeOfDay(time.value as Habit['timeOfDay'])}
                   >
                     <span>{time.icon}</span>
                     <span>{time.label}</span>

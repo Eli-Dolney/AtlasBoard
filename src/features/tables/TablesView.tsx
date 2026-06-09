@@ -378,9 +378,9 @@ export default function TablesView({ workspaceId }: { workspaceId: string }) {
                               await db.tableRows.put({ ...r, cells })
                             }}
                           />
-                          {r.cells[c.id] && (
+                          {r.cells[c.id] != null && String(r.cells[c.id]).trim() !== '' && (
                             <a
-                              href={r.cells[c.id] as string}
+                              href={String(r.cells[c.id])}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="opacity-50 hover:opacity-100"
