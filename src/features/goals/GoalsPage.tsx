@@ -1,6 +1,10 @@
 import { useState, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Goal, type Milestone } from '../../lib/db'
+import { awardOnce } from '../../lib/life'
+import { useAreaSelection, useAreaPredicate } from '../../lib/areaSelection'
+import RelatedMindMaps from '../../components/RelatedMindMaps'
+import { useAtlasItemSelection } from '../../lib/itemSelection'
 
 interface GoalsPageProps {
   workspaceId: string
@@ -16,16 +20,18 @@ const GOAL_CATEGORIES = [
 ]
 
 export default function GoalsPage({ workspaceId }: GoalsPageProps) {
+  const selectedAreas=useAreaSelection(), isVisible=useAreaPredicate()
   const [showAddModal, setShowAddModal] = useState(false)
   const [editingGoal, setEditingGoal] = useState<Goal | null>(null)
-  const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null)
+  const [selectedGoalId, setSelectedGoalId] = useAtlasItemSelection('goal')
   const [filter, setFilter] = useState<'active' | 'completed' | 'all'>('active')
 
-  const goals = useLiveQuery(
+  const allGoals = useLiveQuery(
     () => db.goals.where('workspaceId').equals(workspaceId).reverse().sortBy('createdAt'),
     [workspaceId],
     []
   )
+  const goals=allGoals.filter(g=>isVisible(g.areaId))
 
   const milestones = useLiveQuery(() => db.milestones.toArray(), [], [])
 
@@ -57,6 +63,7 @@ export default function GoalsPage({ workspaceId }: GoalsPageProps) {
         status: 'active',
         color: goalData.color,
         createdAt: Date.now(),
+        areaId:selectedAreas[0]||'area-personal',
         updatedAt: Date.now()
       }
       await db.goals.put(newGoal)
@@ -99,6 +106,7 @@ export default function GoalsPage({ workspaceId }: GoalsPageProps) {
       completed: !milestone.completed,
       completedAt: !milestone.completed ? Date.now() : undefined
     })
+    if (!milestone.completed) await awardOnce(workspaceId, `milestone:${milestone.id}`, 'milestone', 30)
     updateGoalProgress(milestone.goalId)
   }
 
@@ -287,6 +295,7 @@ export default function GoalsPage({ workspaceId }: GoalsPageProps) {
             </div>
 
             {/* Milestones */}
+            <RelatedMindMaps workspaceId={workspaceId} type="goal" itemId={selectedGoal.id}/>
             <div className="goal-milestones">
               <h3 className="goal-milestones-title">Milestones</h3>
               

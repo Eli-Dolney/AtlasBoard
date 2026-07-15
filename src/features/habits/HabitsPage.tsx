@@ -1,6 +1,8 @@
 import { useState, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Habit, type HabitLog } from '../../lib/db'
+import { awardOnce } from '../../lib/life'
+import { useAreaSelection, useAreaPredicate } from '../../lib/areaSelection'
 
 interface HabitsPageProps {
   workspaceId: string
@@ -21,15 +23,17 @@ const TIME_OF_DAY = [
 ]
 
 export default function HabitsPage({ workspaceId }: HabitsPageProps) {
+  const selectedAreas=useAreaSelection(), isVisible=useAreaPredicate()
   const [showAddModal, setShowAddModal] = useState(false)
   const [editingHabit, setEditingHabit] = useState<Habit | null>(null)
   const [view, setView] = useState<'today' | 'all' | 'stats'>('today')
 
-  const habits = useLiveQuery(
+  const allHabits = useLiveQuery(
     () => db.habits.where('workspaceId').equals(workspaceId).and(h => !h.archived).toArray(),
     [workspaceId],
     []
   )
+  const habits=allHabits.filter(h=>isVisible(h.areaId))
 
   const habitLogs = useLiveQuery(
     () => db.habitLogs.toArray(),
@@ -71,7 +75,7 @@ export default function HabitsPage({ workspaceId }: HabitsPageProps) {
       const yesterdayStr = yesterdayDate.toISOString().slice(0, 10)
 
       // Start counting from today if completed, or yesterday
-      let currentDate = logs[0]?.date === todayStr ? todayStr : 
+      const currentDate = logs[0]?.date === todayStr ? todayStr :
                         logs[0]?.date === yesterdayStr ? yesterdayStr : null
 
       if (!currentDate) {
@@ -118,6 +122,7 @@ export default function HabitsPage({ workspaceId }: HabitsPageProps) {
         completed: !existing.completed,
         completedAt: !existing.completed ? Date.now() : undefined
       })
+      if (!existing.completed) await awardOnce(workspaceId, `habit:${habitId}:${today}`, 'habit', 10)
     } else {
       await db.habitLogs.put({
         id: `hl_${Date.now()}`,
@@ -126,6 +131,7 @@ export default function HabitsPage({ workspaceId }: HabitsPageProps) {
         completed: true,
         completedAt: Date.now()
       })
+      await awardOnce(workspaceId, `habit:${habitId}:${today}`, 'habit', 10)
     }
   }
 
@@ -141,7 +147,8 @@ export default function HabitsPage({ workspaceId }: HabitsPageProps) {
         timeOfDay: habit.timeOfDay || 'anytime',
         color: habit.color || HABIT_COLORS[0],
         icon: habit.icon,
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        areaId:selectedAreas[0]||'area-personal'
       }
       await db.habits.put(newHabit)
     }

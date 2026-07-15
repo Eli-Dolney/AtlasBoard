@@ -8,12 +8,19 @@ export type Workspace = {
   lastModified: number
 }
 
+export type Area = { id: string; workspaceId: string; name: string; color: string; icon: string; sort: number; archived?: boolean }
+export type CalendarEvent = { id: string; workspaceId: string; areaId: string; title: string; description?: string; startAt: number; endAt: number; allDay: boolean; location?: string; recurrence?: 'none' | 'daily' | 'weekly' | 'monthly'; reminderMinutes?: number; color?: string; linkedTaskId?: string; linkedNoteId?: string; createdAt: number; updatedAt: number }
+export type PlayerProfile = { id: string; workspaceId: string; lifetimeXp: number; rewardsEnabled: boolean; animationsEnabled: boolean; soundsEnabled: boolean; streaksEnabled: boolean; showXp: boolean; updatedAt: number }
+export type RewardActivity = { id: string; workspaceId: string; sourceKey: string; sourceType: 'task' | 'habit' | 'milestone' | 'focus'; xp: number; createdAt: number }
+export type AchievementProgress = { id: string; workspaceId: string; achievementId: string; unlockedAt: number; progress: number }
+
 export type BoardRecord = {
   id: string
   workspaceId: string
   title: string
   data: string // JSON string of React Flow graph
   updatedAt: number
+  areaId?: string
 }
 
 export type TaskList = {
@@ -40,7 +47,12 @@ export type Task = {
   dependencyIds?: string[]
   // backlink to mind map node
   nodeId?: string | null
+  nodeBoardId?: string | null
   sort: number
+  areaId?: string
+  scheduledStartAt?: number | null
+  scheduledEndAt?: number | null
+  reminderMinutes?: number
 }
 
 export type TableMeta = {
@@ -86,6 +98,7 @@ export type Note = {
   linkedBoardIds?: string[]
   createdAt: number
   updatedAt: number
+  areaId?: string
 }
 
 // Focus/Pomodoro
@@ -111,6 +124,7 @@ export type Habit = {
   icon?: string
   archived?: boolean
   createdAt: number
+  areaId?: string
 }
 
 export type HabitLog = {
@@ -135,6 +149,7 @@ export type Goal = {
   color?: string
   createdAt: number
   updatedAt: number
+  areaId?: string
 }
 
 export type Milestone = {
@@ -159,6 +174,7 @@ export type Doc = {
   isFavorite?: boolean
   createdAt: number
   updatedAt: number
+  areaId?: string
 }
 
 export class AtlasDB extends Dexie {
@@ -177,6 +193,11 @@ export class AtlasDB extends Dexie {
   goals!: Table<Goal, string>
   milestones!: Table<Milestone, string>
   docs!: Table<Doc, string>
+  areas!: Table<Area, string>
+  calendarEvents!: Table<CalendarEvent, string>
+  playerProfiles!: Table<PlayerProfile, string>
+  rewardActivities!: Table<RewardActivity, string>
+  achievementProgress!: Table<AchievementProgress, string>
 
   constructor() {
     super('atlas-db')
@@ -247,6 +268,23 @@ export class AtlasDB extends Dexie {
       milestones: 'id, goalId, sort',
       docs: 'id, workspaceId, parentId, createdAt, updatedAt',
     })
+    this.version(8).stores({
+      workspaces: 'id, name, lastModified', boards: 'id, workspaceId, areaId, updatedAt', lists: 'id, workspaceId, sort',
+      tasks: 'id, listId, areaId, dueAt, scheduledStartAt, status, sort', tables: 'id, workspaceId, createdAt', tableColumns: 'id, tableId, sort', tableRows: 'id, tableId, sort', templates: 'id, createdAt, name',
+      notes: 'id, workspaceId, areaId, createdAt, updatedAt', focusSessions: 'id, workspaceId, completedAt, type', habits: 'id, workspaceId, areaId, createdAt', habitLogs: 'id, habitId, date', goals: 'id, workspaceId, areaId, status, createdAt', milestones: 'id, goalId, sort', docs: 'id, workspaceId, areaId, parentId, createdAt, updatedAt',
+      areas: 'id, workspaceId, sort, archived', calendarEvents: 'id, workspaceId, areaId, startAt, endAt', playerProfiles: 'id, workspaceId', rewardActivities: 'id, workspaceId, &sourceKey, createdAt', achievementProgress: 'id, workspaceId, achievementId'
+    }).upgrade(async tx => {
+      const areaId = 'area-personal'
+      await tx.table('areas').put({ id: areaId, workspaceId: 'default-ws', name: 'Personal', color: '#8b5cf6', icon: '👤', sort: 0 })
+      for (const name of ['boards', 'tasks', 'notes', 'habits', 'goals', 'docs']) await tx.table(name).toCollection().modify((item: { areaId?: string }) => { if (!item.areaId) item.areaId = areaId })
+    })
+
+    this.version(9).stores({
+      workspaces: 'id, name, lastModified', boards: 'id, workspaceId, areaId, updatedAt', lists: 'id, workspaceId, sort',
+      tasks: 'id, listId, areaId, dueAt, scheduledStartAt, status, nodeId, nodeBoardId, [nodeBoardId+nodeId], sort', tables: 'id, workspaceId, createdAt', tableColumns: 'id, tableId, sort', tableRows: 'id, tableId, sort', templates: 'id, createdAt, name',
+      notes: 'id, workspaceId, areaId, createdAt, updatedAt', focusSessions: 'id, workspaceId, completedAt, type', habits: 'id, workspaceId, areaId, createdAt', habitLogs: 'id, habitId, date', goals: 'id, workspaceId, areaId, status, createdAt', milestones: 'id, goalId, sort', docs: 'id, workspaceId, areaId, parentId, createdAt, updatedAt',
+      areas: 'id, workspaceId, sort, archived', calendarEvents: 'id, workspaceId, areaId, startAt, endAt', playerProfiles: 'id, workspaceId', rewardActivities: 'id, workspaceId, &sourceKey, createdAt', achievementProgress: 'id, workspaceId, achievementId'
+    })
 
     // Bind typed properties to actual stores
     this.workspaces = this.table('workspaces')
@@ -264,6 +302,11 @@ export class AtlasDB extends Dexie {
     this.goals = this.table('goals')
     this.milestones = this.table('milestones')
     this.docs = this.table('docs')
+    this.areas = this.table('areas')
+    this.calendarEvents = this.table('calendarEvents')
+    this.playerProfiles = this.table('playerProfiles')
+    this.rewardActivities = this.table('rewardActivities')
+    this.achievementProgress = this.table('achievementProgress')
   }
 }
 

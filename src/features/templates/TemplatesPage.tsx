@@ -1,4 +1,6 @@
-import { useState } from 'react'
+import { useState, type CSSProperties } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { db, type BoardTemplate } from '../../lib/db'
 
 interface Template {
   id: string
@@ -116,13 +118,37 @@ const templates: Template[] = [
 const categories = ['All', 'Life', 'Work', 'School', 'Creative']
 
 interface TemplatesPageProps {
-  onSelectTemplate: (templateId: string) => void
+  onSelectTemplate: (templateId: string, templateName?: string) => void
+}
+
+const previewBranches: Record<string, string[]> = {
+  'life-dashboard': ['Family', 'Personal', 'Work', 'Health'],
+  'weekly-planner': ['Brain dump', 'Priorities', 'Schedule', 'Later'],
+  'adhd-task-hub': ['Now', 'Next', 'Waiting', 'Ideas'],
+  'goal-planning': ['Vision', 'Milestones', 'Habits', 'Review'],
+  'work-projects': ['Planning', 'Team', 'Execution', 'Review'],
+  'meeting-notes': ['Agenda', 'Notes', 'Decisions', 'Actions'],
+  'project-management': ['Scope', 'Timeline', 'Tasks', 'Risks'],
+  'school-hub': ['Classes', 'Assignments', 'Schedule', 'Resources'],
+  'study-notes': ['Concepts', 'Questions', 'Sources', 'Connections'],
+  'knowledge-base': ['Learning', 'Ideas', 'Notes', 'Insights'],
+  'youtube-content': ['Ideas', 'Scripts', 'Production', 'Analytics'],
+  'side-projects': ['Ideas', 'Active', 'Next steps', 'Archive'],
 }
 
 export default function TemplatesPage({ onSelectTemplate }: TemplatesPageProps) {
   const [selectedCategory, setSelectedCategory] = useState('All')
   const [searchQuery, setSearchQuery] = useState('')
   const [previewTemplate, setPreviewTemplate] = useState<Template | null>(null)
+  const customTemplates = useLiveQuery(() => db.templates.reverse().sortBy('createdAt'), [], [])
+  const customDetails = (template: BoardTemplate) => {
+    try {
+      const parsed = JSON.parse(template.data) as { nodes?: unknown[]; edges?: unknown[] }
+      return `${parsed.nodes?.length || 0} nodes · ${parsed.edges?.length || 0} connections`
+    } catch {
+      return 'Saved mind map'
+    }
+  }
 
   const filteredTemplates = templates.filter(t => {
     const matchesCategory = selectedCategory === 'All' || t.category === selectedCategory
@@ -179,6 +205,54 @@ export default function TemplatesPage({ onSelectTemplate }: TemplatesPageProps) 
 
       {/* Templates Grid */}
       <div className="templates-content">
+        {customTemplates.length > 0 && selectedCategory === 'All' && (
+          <div className="templates-section">
+            <div className="templates-section-heading">
+              <div>
+                <h2 className="templates-section-title">Your Templates</h2>
+                <p>Reusable maps saved locally from the canvas</p>
+              </div>
+            </div>
+            <div className="templates-grid">
+              {customTemplates.map(template => (
+                <div key={template.id} className="template-card custom-template-card">
+                  <div className="template-card-icon custom-template-icon">✦</div>
+                  <div className="template-card-content">
+                    <h3 className="template-card-title">{template.name}</h3>
+                    <p className="template-card-description">{customDetails(template)}</p>
+                    <small>Saved {new Date(template.createdAt).toLocaleDateString()}</small>
+                  </div>
+                  <div className="template-card-actions">
+                    <button
+                      className="btn btn-primary btn-sm"
+                      onClick={() => onSelectTemplate(template.id, template.name)}
+                    >
+                      Create New Map
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={async () => {
+                        const name = prompt('Rename template', template.name)?.trim()
+                        if (name) await db.templates.update(template.id, { name })
+                      }}
+                    >
+                      Rename
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm danger-text"
+                      onClick={async () => {
+                        if (confirm(`Delete template “${template.name}”?`))
+                          await db.templates.delete(template.id)
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {selectedCategory === 'All' ? (
           // Grouped by category
           Object.entries(groupedTemplates).map(
@@ -193,10 +267,7 @@ export default function TemplatesPage({ onSelectTemplate }: TemplatesPageProps) 
                         className="template-card"
                         onClick={() => setPreviewTemplate(template)}
                       >
-                        <div
-                          className="template-card-icon"
-                          style={{ background: template.color }}
-                        >
+                        <div className="template-card-icon" style={{ background: template.color }}>
                           {template.icon}
                         </div>
                         <div className="template-card-content">
@@ -208,10 +279,10 @@ export default function TemplatesPage({ onSelectTemplate }: TemplatesPageProps) 
                             className="btn btn-primary btn-sm"
                             onClick={e => {
                               e.stopPropagation()
-                              onSelectTemplate(template.id)
+                              onSelectTemplate(template.id, template.name)
                             }}
                           >
-                            Use Template
+                            Create New Map
                           </button>
                         </div>
                       </div>
@@ -229,10 +300,7 @@ export default function TemplatesPage({ onSelectTemplate }: TemplatesPageProps) 
                 className="template-card"
                 onClick={() => setPreviewTemplate(template)}
               >
-                <div
-                  className="template-card-icon"
-                  style={{ background: template.color }}
-                >
+                <div className="template-card-icon" style={{ background: template.color }}>
                   {template.icon}
                 </div>
                 <div className="template-card-content">
@@ -244,10 +312,10 @@ export default function TemplatesPage({ onSelectTemplate }: TemplatesPageProps) 
                     className="btn btn-primary btn-sm"
                     onClick={e => {
                       e.stopPropagation()
-                      onSelectTemplate(template.id)
+                      onSelectTemplate(template.id, template.name)
                     }}
                   >
-                    Use Template
+                    Create New Map
                   </button>
                 </div>
               </div>
@@ -274,7 +342,12 @@ export default function TemplatesPage({ onSelectTemplate }: TemplatesPageProps) 
               <div className="flex items-center gap-3">
                 <div
                   className="template-card-icon"
-                  style={{ background: previewTemplate.color, width: 48, height: 48, fontSize: '1.5rem' }}
+                  style={{
+                    background: previewTemplate.color,
+                    width: 48,
+                    height: 48,
+                    fontSize: '1.5rem',
+                  }}
                 >
                   {previewTemplate.icon}
                 </div>
@@ -292,20 +365,27 @@ export default function TemplatesPage({ onSelectTemplate }: TemplatesPageProps) 
                 {previewTemplate.description}
               </p>
               <div
-                className="template-preview"
-                style={{
-                  background: 'var(--bg-secondary)',
-                  borderRadius: 'var(--radius-lg)',
-                  padding: 'var(--space-xl)',
-                  textAlign: 'center',
-                  color: 'var(--text-tertiary)',
-                }}
+                className="template-map-preview"
+                style={{ '--template-color': previewTemplate.color } as CSSProperties}
               >
-                <div style={{ fontSize: '3rem', marginBottom: 'var(--space-md)' }}>
-                  {previewTemplate.icon}
+                <div className="template-preview-center">
+                  <span>{previewTemplate.icon}</span>
+                  <b>{previewTemplate.name}</b>
                 </div>
-                <p>Template preview coming soon</p>
+                <div className="template-preview-branches">
+                  {(
+                    previewBranches[previewTemplate.id] || ['Ideas', 'Plan', 'Action', 'Review']
+                  ).map((branch, index) => (
+                    <div key={branch} style={{ '--branch-index': index } as CSSProperties}>
+                      <i />
+                      <span>{branch}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
+              <p className="template-preview-note">
+                Creates a new local map with starter branches. Your current maps stay untouched.
+              </p>
             </div>
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={() => setPreviewTemplate(null)}>
@@ -314,11 +394,11 @@ export default function TemplatesPage({ onSelectTemplate }: TemplatesPageProps) 
               <button
                 className="btn btn-primary"
                 onClick={() => {
-                  onSelectTemplate(previewTemplate.id)
+                  onSelectTemplate(previewTemplate.id, previewTemplate.name)
                   setPreviewTemplate(null)
                 }}
               >
-                Use This Template
+                Create New Map
               </button>
             </div>
           </div>

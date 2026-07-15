@@ -48,7 +48,7 @@ export default function NoteNode({ id, data, selected }: NodeProps) {
     if (!list) {
       const listId = `l_${Date.now()}`
       await db.lists.put({ id: listId, workspaceId: WORKSPACE_ID, title: 'General', sort: 0 })
-      list = { id: listId } as any
+      list = { id: listId, workspaceId: WORKSPACE_ID, title: 'General', sort: 0 }
     }
 
     const task: Task = {

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Handle, Position, type NodeProps, useReactFlow, type Edge } from '@reactflow/core'
+import { Handle, Position, type NodeProps, useReactFlow, type Edge, type Node } from '@reactflow/core'
 import { NodeResizer } from '@reactflow/node-resizer'
 import { NodeToolbar } from '@reactflow/node-toolbar'
 import '@reactflow/node-resizer/dist/style.css'
@@ -100,13 +100,13 @@ export function EditableNode({ id, data, selected }: NodeProps) {
   const handleLinkClick = (title: string) => {
     const nodes = getNodes()
     const target = nodes.find(
-      n => typeof (n.data as any)?.label === 'string' && ((n.data as any).label as string) === title
+      n => typeof n.data?.label === 'string' && n.data.label === title
     )
     if (target) {
       setNodes(cur => cur.map(n => ({ ...n, selected: n.id === target.id })))
       try {
         setCenter?.(target.position.x, target.position.y, { zoom: 1.2, duration: 500 })
-      } catch {}
+      } catch { /* viewport animation is optional */ }
       return
     }
     if (!confirm(`Create node "${title}" and link it as a child?`)) return
@@ -123,7 +123,7 @@ export function EditableNode({ id, data, selected }: NodeProps) {
       setEdges?.(eds =>
         eds.concat({ id: `e_${Date.now()}`, source: id, target: newId, type: 'smoothstep' } as Edge)
       )
-      return cur.concat(newNode as any)
+      return cur.concat(newNode as Node)
     })
   }
 
@@ -228,7 +228,7 @@ export function EditableNode({ id, data, selected }: NodeProps) {
               setNodes(nodes =>
                 nodes.map(n =>
                   n.id === id
-                    ? { ...n, data: { ...n.data, collapsed: !Boolean(n.data?.collapsed) } }
+                    ? { ...n, data: { ...n.data, collapsed: !n.data?.collapsed } }
                     : n
                 )
               )

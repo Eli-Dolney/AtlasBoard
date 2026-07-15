@@ -1,25 +1,38 @@
 import './index.css'
-import { useEffect, useState } from 'react'
-import { BoardCanvas } from './features/boards/BoardCanvas'
-import TasksPage from './features/tasks/TasksPage'
-import TablesView from './features/tables/TablesView'
-import GraphPage from './features/graph/GraphPage'
-import DashboardPage from './features/dashboard/DashboardPage'
-import TemplatesPage from './features/templates/TemplatesPage'
-import NotesPage from './features/notes/NotesPage'
-import CalendarPage from './features/calendar/CalendarPage'
-import FocusPage from './features/focus/FocusPage'
-import HabitsPage from './features/habits/HabitsPage'
-import GoalsPage from './features/goals/GoalsPage'
-import GanttView from './features/tasks/GanttView'
-import GalleryView from './features/tables/GalleryView'
-import DocsPage from './features/docs/DocsPage'
-import CommandMenu, { type Command } from './components/CommandMenu'
+import { lazy, Suspense, useEffect, useState } from 'react'
+import AreaFilter from './components/AreaFilter'
+import { db } from './lib/db'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { ensureLifeHub } from './lib/lifeBootstrap'
+import { AreaSelectionProvider } from './lib/areaSelection'
+import type { Command } from './components/CommandMenu'
 import { emitCreateTable, emitCreateTaskList, emitOpenQuickPalette } from './lib/events'
-import { SettingsModal } from './components/SettingsModal'
-import { PomodoroTimer } from './components/PomodoroTimer'
+import type { SearchResult } from './lib/search'
+import { openAtlasItem } from './lib/navigation'
+import { createMindMapForTemplate } from './lib/mindmapCreation'
 
-type Route = 'dashboard' | 'mind' | 'tables' | 'tasks' | 'graph' | 'templates' | 'notes' | 'calendar' | 'focus' | 'habits' | 'goals' | 'gantt' | 'gallery' | 'docs'
+const MindMapsPage = lazy(() => import('./features/boards/MindMapsPage'))
+const TasksPage = lazy(() => import('./features/tasks/TasksPage'))
+const TablesView = lazy(() => import('./features/tables/TablesView'))
+const GraphPage = lazy(() => import('./features/graph/GraphPage'))
+const DashboardPage = lazy(() => import('./features/dashboard/DashboardPage'))
+const TodayPage = lazy(() => import('./features/dashboard/TodayPage'))
+const TemplatesPage = lazy(() => import('./features/templates/TemplatesPage'))
+const NotesPage = lazy(() => import('./features/notes/NotesPage'))
+const CalendarPage = lazy(() => import('./features/calendar/CalendarPage'))
+const FocusPage = lazy(() => import('./features/focus/FocusPage'))
+const HabitsPage = lazy(() => import('./features/habits/HabitsPage'))
+const GoalsPage = lazy(() => import('./features/goals/GoalsPage'))
+const GanttView = lazy(() => import('./features/tasks/GanttView'))
+const GalleryView = lazy(() => import('./features/tables/GalleryView'))
+const DocsPage = lazy(() => import('./features/docs/DocsPage'))
+const SearchDialog = lazy(() => import('./components/SearchDialog').then(module => ({default:module.SearchDialog})))
+const CommandMenu = lazy(() => import('./components/CommandMenu'))
+const SettingsModal = lazy(() => import('./components/SettingsModal').then(module => ({default:module.SettingsModal})))
+const PomodoroTimer = lazy(() => import('./components/PomodoroTimer').then(module => ({default:module.PomodoroTimer})))
+const RewardToast = lazy(() => import('./components/RewardToast'))
+
+type Route = 'dashboard' | 'overview' | 'mind' | 'tables' | 'tasks' | 'graph' | 'templates' | 'notes' | 'calendar' | 'focus' | 'habits' | 'goals' | 'gantt' | 'gallery' | 'docs'
 
 // Navigation sections for sidebar
 const navSections = [
@@ -28,6 +41,7 @@ const navSections = [
     title: 'Workspace',
     items: [
       { id: 'dashboard', label: 'Dashboard', icon: '🏠' },
+      { id: 'overview', label: 'Overview', icon: '◫' },
       { id: 'mind', label: 'Mind Maps', icon: '🧠' },
       { id: 'tasks', label: 'Tasks', icon: '✓' },
       { id: 'tables', label: 'Tables', icon: '📊' },
@@ -65,12 +79,18 @@ const navSections = [
 
 function App() {
   const workspaceId = 'default-ws'
-  const boardId = 'default-board'
 
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [cmdOpen, setCmdOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [pomodoroOpen, setPomodoroOpen] = useState(false)
+  const [rewardsReady,setRewardsReady]=useState(false)
+  const [selectedAreas, setSelectedAreas] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem('atlas-area-filter') || '[]') } catch { return [] } })
+  const areas = useLiveQuery(() => db.areas.where('workspaceId').equals(workspaceId).sortBy('sort'), [workspaceId], [])
+  useEffect(() => { void ensureLifeHub(workspaceId) }, [workspaceId])
+  useEffect(() => { localStorage.setItem('atlas-area-filter', JSON.stringify(selectedAreas)) }, [selectedAreas])
+  useEffect(()=>{const id=window.setTimeout(()=>setRewardsReady(true),1200);return()=>window.clearTimeout(id)},[])
   const [route, setRoute] = useState<Route>(() => {
     const hash = (window.location.hash || '').replace(/^#\/?/, '')
     if (hash.startsWith('tables')) return 'tables'
@@ -86,6 +106,7 @@ function App() {
     if (hash.startsWith('gantt')) return 'gantt'
     if (hash.startsWith('gallery')) return 'gallery'
     if (hash.startsWith('docs')) return 'docs'
+    if (hash.startsWith('overview')) return 'overview'
     return 'dashboard'
   })
 
@@ -109,19 +130,21 @@ function App() {
       else if (hash.startsWith('gantt')) setRoute('gantt')
       else if (hash.startsWith('gallery')) setRoute('gallery')
       else if (hash.startsWith('docs')) setRoute('docs')
+      else if (hash.startsWith('overview')) setRoute('overview')
       else setRoute('dashboard')
     }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
 
-  // Cmd+K global command menu
+  // Cmd+K opens global content search; Shift+Cmd+K opens app commands.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const isMod = e.metaKey || e.ctrlKey
       if (isMod && e.key.toLowerCase() === 'k') {
         e.preventDefault()
-        setCmdOpen(true)
+        if (e.shiftKey) setCmdOpen(true)
+        else setSearchOpen(true)
       }
       // Cmd+, for settings
       if (isMod && e.key === ',') {
@@ -138,17 +161,38 @@ function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const handleTemplateSelect = (templateId: string) => {
-    // Navigate to mind map and trigger template insertion
+  const handleSearchResult = (result: SearchResult) => {
+    if ((result.type === 'board' || result.type === 'node') && result.boardId) {
+      localStorage.setItem('atlas-active-board', result.boardId)
+      if(result.nodeId) localStorage.setItem('atlas-focus-mind-node',result.nodeId)
+      navigate('mind')
+      if(result.nodeId) setTimeout(()=>window.dispatchEvent(new CustomEvent('atlas-focus-mind-node',{detail:{boardId:result.boardId,nodeId:result.nodeId}})),150)
+      return
+    }
+    if (result.type === 'task' || result.type === 'list') {
+      navigate('tasks')
+      if (result.type === 'task' && result.itemId) openAtlasItem('task',result.itemId)
+      return
+    }
+    if(result.itemId&&(result.type==='event'||result.type==='goal'||result.type==='note'||result.type==='doc')){openAtlasItem(result.type,result.itemId);return}
+    const routes: Partial<Record<SearchResult['type'], Route>> = {habit:'habits'}
+    const target=routes[result.type]
+    if(target) navigate(target)
+  }
+
+  const handleTemplateSelect = async (templateId: string, templateName?:string) => {
+    // Templates always start a fresh map, protecting the user's current web.
+    await createMindMapForTemplate(workspaceId,selectedAreas[0]||'area-personal',templateName||'New Mind Map')
+    localStorage.setItem('atlas-pending-template',templateId)
     navigate('mind')
-    // The BoardCanvas will handle the template via events
     setTimeout(() => {
-      window.dispatchEvent(new CustomEvent('insert-template', { detail: templateId }))
-    }, 100)
+      if(localStorage.getItem('atlas-pending-template')===templateId) window.dispatchEvent(new CustomEvent('insert-template', { detail: templateId }))
+    }, 250)
   }
 
   const commands: Command[] = [
     { id: 'nav-dashboard', label: 'Go to Dashboard', hint: 'G D', run: () => navigate('dashboard') },
+    { id: 'nav-overview', label: 'Go to Overview', run: () => navigate('overview') },
     { id: 'nav-mind', label: 'Go to Mind Map', hint: 'G M', run: () => navigate('mind') },
     { id: 'nav-tables', label: 'Go to Tables', hint: 'G T', run: () => navigate('tables') },
     { id: 'nav-tasks', label: 'Go to Tasks', hint: 'G P', run: () => navigate('tasks') },
@@ -173,7 +217,9 @@ function App() {
   const getPageTitle = () => {
     switch (route) {
       case 'dashboard':
-        return 'Dashboard'
+        return 'Today'
+      case 'overview':
+        return 'Overview'
       case 'mind':
         return 'Mind Map'
       case 'tasks':
@@ -208,7 +254,7 @@ function App() {
   const showHeader = route !== 'mind'
 
   return (
-    <div className="app-shell">
+    <AreaSelectionProvider selected={selectedAreas}><div className="app-shell">
       {/* Sidebar */}
       <aside
         className="sidebar"
@@ -249,7 +295,7 @@ function App() {
               <span className="sidebar-item-icon">⚡</span>
               <span>Quick Create</span>
             </button>
-            <button className="sidebar-item" onClick={() => setCmdOpen(true)}>
+            <button className="sidebar-item" onClick={() => setSearchOpen(true)}>
               <span className="sidebar-item-icon">🔍</span>
               <span>Search</span>
               <span className="ml-auto text-xs opacity-50">⌘K</span>
@@ -296,9 +342,10 @@ function App() {
               </div>
             </div>
             <div className="main-header-actions">
+              <AreaFilter areas={areas} selected={selectedAreas} onChange={setSelectedAreas} />
               <button
                 className="btn btn-ghost btn-icon"
-                onClick={() => setCmdOpen(true)}
+                onClick={() => setSearchOpen(true)}
                 title="Search (⌘K)"
               >
                 🔍
@@ -319,19 +366,27 @@ function App() {
         )}
 
         {/* Main Body */}
-        <main className="main-body">
+        <Suspense fallback={<div className="page-loading"><span>Loading your workspace…</span></div>}><main className="main-body">
           {route === 'dashboard' && (
+            <TodayPage workspaceId={workspaceId} selectedAreas={selectedAreas} onNavigate={r => navigate(r as Route)} />
+          )}
+
+          {route === 'overview' && (
             <DashboardPage workspaceId={workspaceId} onNavigate={r => navigate(r as Route)} />
           )}
 
           {route === 'mind' && (
             <div style={{ height: '100%', position: 'relative' }}>
-              <BoardCanvas
-                boardId={boardId}
+              <MindMapsPage
                 workspaceId={workspaceId}
+                selectedAreas={selectedAreas}
                 onOpenTools={t => {
                   if (t === 'kanban') navigate('tasks')
                   if (t === 'tables') navigate('tables')
+                  if (t === 'calendar') navigate('calendar')
+                  if (t === 'notes') navigate('notes')
+                  if (t === 'docs') navigate('docs')
+                  if (t === 'goals') navigate('goals')
                 }}
               />
               {/* Floating sidebar toggle for mind map view */}
@@ -369,7 +424,7 @@ function App() {
 
           {route === 'calendar' && (
             <div className="p-6" style={{ height: '100%' }}>
-              <CalendarPage workspaceId={workspaceId} />
+              <CalendarPage workspaceId={workspaceId} selectedAreas={selectedAreas} />
             </div>
           )}
 
@@ -416,17 +471,17 @@ function App() {
               <DocsPage workspaceId={workspaceId} />
             </div>
           )}
-        </main>
+        </main></Suspense>
       </div>
 
-      <CommandMenu open={cmdOpen} onClose={() => setCmdOpen(false)} commands={commands} />
-      <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
-      <PomodoroTimer
-        workspaceId={workspaceId}
-        isOpen={pomodoroOpen}
-        onClose={() => setPomodoroOpen(false)}
-      />
-    </div>
+      <Suspense fallback={null}>
+        {cmdOpen&&<CommandMenu open onClose={() => setCmdOpen(false)} commands={commands} />}
+        {searchOpen&&<SearchDialog isOpen onClose={() => setSearchOpen(false)} onSelectResult={handleSearchResult} />}
+        {settingsOpen&&<SettingsModal isOpen onClose={() => setSettingsOpen(false)} />}
+        {pomodoroOpen&&<PomodoroTimer workspaceId={workspaceId} isOpen onClose={() => setPomodoroOpen(false)} />}
+        {rewardsReady&&<RewardToast workspaceId={workspaceId}/>}
+      </Suspense>
+    </div></AreaSelectionProvider>
   )
 }
 

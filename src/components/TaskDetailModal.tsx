@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { db, type Task, type TaskList } from '../lib/db'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { setTaskCompleted } from '../lib/life'
+import RelatedMindMaps from './RelatedMindMaps'
 
 interface TaskDetailModalProps {
   taskId: string | null
@@ -32,6 +34,7 @@ export function TaskDetailModal({ taskId, isOpen, onClose }: TaskDetailModalProp
     [],
     [] as TaskList[]
   )
+  const areas = useLiveQuery(() => db.areas.toArray(), [], [])
 
   const [editedTask, setEditedTask] = useState<Partial<Task>>({})
   const [newTag, setNewTag] = useState('')
@@ -48,6 +51,9 @@ export function TaskDetailModal({ taskId, isOpen, onClose }: TaskDetailModalProp
         estimateMinutes: task.estimateMinutes,
         tags: task.tags || [],
         listId: task.listId,
+        areaId: task.areaId,
+        scheduledStartAt: task.scheduledStartAt,
+        scheduledEndAt: task.scheduledEndAt,
       })
     }
   }, [task])
@@ -81,6 +87,7 @@ export function TaskDetailModal({ taskId, isOpen, onClose }: TaskDetailModalProp
   }
 
   const currentList = lists.find(l => l.id === task.listId)
+  const changeStatus=async(status:NonNullable<Task['status']>)=>{setEditedTask(prev=>({...prev,status}));if(status==='done'&&currentList)await setTaskCompleted(task.id,currentList.workspaceId,true);else await db.tasks.update(task.id,{status})}
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -110,12 +117,16 @@ export function TaskDetailModal({ taskId, isOpen, onClose }: TaskDetailModalProp
         <div className="modal-body">
           {/* Status & Priority Row */}
           <div className="grid grid-cols-2 gap-4 mb-6">
+            <div><label className="text-caption block mb-2">Life Area</label><select className="select w-full" value={editedTask.areaId || 'area-personal'} onChange={e=>updateTask({areaId:e.target.value})}>{areas.map(a=><option key={a.id} value={a.id}>{a.icon} {a.name}</option>)}</select></div>
+            <div><label className="text-caption block mb-2">Scheduled Time</label><input className="input" type="datetime-local" value={editedTask.scheduledStartAt ? new Date(editedTask.scheduledStartAt-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16):''} onChange={e=>updateTask({scheduledStartAt:e.target.value?new Date(e.target.value).getTime():null})}/></div>
+          </div>
+          <div className="grid grid-cols-2 gap-4 mb-6">
             <div>
               <label className="text-caption block mb-2">Status</label>
               <select
                 className="select w-full"
                 value={editedTask.status || 'not-started'}
-                onChange={e => updateTask({ status: e.target.value as Task['status'] })}
+                onChange={e => changeStatus(e.target.value as NonNullable<Task['status']>)}
               >
                 {statusOptions.map(opt => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -236,6 +247,8 @@ export function TaskDetailModal({ taskId, isOpen, onClose }: TaskDetailModalProp
             </div>
           </div>
 
+          {currentList&&<RelatedMindMaps workspaceId={currentList.workspaceId} type="task" itemId={task.id}/>}
+
           {/* Metadata */}
           <div className="border-t pt-4" style={{ borderColor: 'var(--border-light)' }}>
             <div className="flex items-center justify-between text-caption">
@@ -261,4 +274,3 @@ export function TaskDetailModal({ taskId, isOpen, onClose }: TaskDetailModalProp
 }
 
 export default TaskDetailModal
-

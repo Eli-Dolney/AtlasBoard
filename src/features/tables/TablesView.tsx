@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { db, type TableColumn, type TableMeta, type TableRow } from '../../lib/db'
 import { onCreateTable } from '../../lib/events'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -49,7 +49,7 @@ export default function TablesView({ workspaceId }: { workspaceId: string }) {
     [] as TableRow[]
   )
 
-  const addTable = async () => {
+  const addTable = useCallback(async () => {
     const id = `tbl_${Date.now()}`
     const meta: TableMeta = { id, workspaceId, name: 'New Table', createdAt: Date.now() }
     await db.tableMetas.put(meta)
@@ -74,7 +74,7 @@ export default function TablesView({ workspaceId }: { workspaceId: string }) {
     })
     setActiveId(id)
     setEditingTableId(id)
-  }
+  }, [workspaceId])
 
   // Global command: create table
   useEffect(
@@ -82,7 +82,7 @@ export default function TablesView({ workspaceId }: { workspaceId: string }) {
       onCreateTable(() => {
         void addTable()
       }),
-    []
+    [addTable]
   )
 
   const addRow = async () => {
@@ -111,8 +111,9 @@ export default function TablesView({ workspaceId }: { workspaceId: string }) {
     await db.tableColumns.delete(colId)
     if (rows) {
       const nextRows = rows.map(r => {
-        const { [colId]: _removed, ...rest } = r.cells
-        return { ...r, cells: rest }
+        const cells={...r.cells}
+        delete cells[colId]
+        return { ...r, cells }
       })
       await db.tableRows.bulkPut(nextRows)
     }

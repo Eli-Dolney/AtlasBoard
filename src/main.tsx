@@ -17,8 +17,5 @@ void ensureStarterData().then(() => {
 })
 
 if ('Notification' in window) {
-  if (Notification.permission === 'default') {
-    void Notification.requestPermission()
-  }
-  startLocalReminders()
+  if (Notification.permission === 'granted') startLocalReminders()
 }

@@ -1,6 +1,8 @@
 import { useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type HabitLog } from '../../lib/db'
+import { awardOnce } from '../../lib/life'
+import { useAreaPredicate } from '../../lib/areaSelection'
 
 interface DailyHabitsWidgetProps {
   workspaceId: string
@@ -8,11 +10,13 @@ interface DailyHabitsWidgetProps {
 }
 
 export default function DailyHabitsWidget({ workspaceId, onViewAll }: DailyHabitsWidgetProps) {
-  const habits = useLiveQuery(
+  const isVisible=useAreaPredicate()
+  const allHabits = useLiveQuery(
     () => db.habits.where('workspaceId').equals(workspaceId).and(h => !h.archived).toArray(),
     [workspaceId],
     []
   )
+  const habits=allHabits.filter(h=>isVisible(h.areaId))
 
   const habitLogs = useLiveQuery(() => db.habitLogs.toArray(), [], [])
 
@@ -34,6 +38,7 @@ export default function DailyHabitsWidget({ workspaceId, onViewAll }: DailyHabit
         completed: !existing.completed,
         completedAt: !existing.completed ? Date.now() : undefined
       })
+      if (!existing.completed) await awardOnce(workspaceId, `habit:${habitId}:${today}`, 'habit', 10)
     } else {
       await db.habitLogs.put({
         id: `hl_${Date.now()}`,
@@ -42,6 +47,7 @@ export default function DailyHabitsWidget({ workspaceId, onViewAll }: DailyHabit
         completed: true,
         completedAt: Date.now()
       })
+      await awardOnce(workspaceId, `habit:${habitId}:${today}`, 'habit', 10)
     }
   }
 

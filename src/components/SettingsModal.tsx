@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react'
 import { db } from '../lib/db'
 import { applyTheme, getStoredTheme, type ThemePreference } from '../lib/theme'
 import 'dexie-export-import'
+import { useLiveQuery } from 'dexie-react-hooks'
 
 interface SettingsModalProps {
   isOpen: boolean
@@ -11,9 +12,11 @@ interface SettingsModalProps {
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [isExporting, setIsExporting] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
-  const [activeTab, setActiveTab] = useState<'data' | 'appearance' | 'about'>('data')
+  const [activeTab, setActiveTab] = useState<'data' | 'areas' | 'appearance' | 'about'>('data')
   const [theme, setTheme] = useState<ThemePreference>(() => getStoredTheme())
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const areas = useLiveQuery(() => db.areas.orderBy('sort').toArray(), [], [])
+  const player = useLiveQuery(() => db.playerProfiles.toCollection().first(), [], undefined)
 
   if (!isOpen) return null
 
@@ -92,6 +95,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       await db.goals.clear()
       await db.milestones.clear()
       await db.focusSessions.clear()
+      await db.areas.clear()
+      await db.calendarEvents.clear()
+      await db.playerProfiles.clear()
+      await db.rewardActivities.clear()
+      await db.achievementProgress.clear()
 
       // Clear the welcome shown flag
       localStorage.removeItem('atlas-welcome-shown')
@@ -119,6 +127,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
         {/* Tabs */}
         <div className="flex border-b" style={{ borderColor: 'var(--border-light)' }}>
+          <button
+            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'areas' ? 'border-[var(--brand-primary)] text-[var(--brand-primary)]' : 'border-transparent text-[var(--text-secondary)]'}`}
+            onClick={() => setActiveTab('areas')}
+          >🌈 Areas</button>
           <button
             className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
               activeTab === 'data' 
@@ -152,6 +164,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         </div>
 
         <div className="modal-body">
+          {activeTab === 'areas' && <div className="space-y-4"><div><h3 className="font-medium">Life Areas</h3><p className="text-sm" style={{color:'var(--text-tertiary)'}}>Use colors to keep family, personal, work, and creative plans clear while seeing everything together.</p></div>{areas.map(a=><div key={a.id} className="flex items-center gap-3"><input type="color" value={a.color} onChange={e=>db.areas.update(a.id,{color:e.target.value})}/><input className="input flex-1" value={a.name} onChange={e=>db.areas.update(a.id,{name:e.target.value})}/><input className="input" style={{width:58}} value={a.icon} onChange={e=>db.areas.update(a.id,{icon:e.target.value})}/><button className="btn btn-ghost btn-sm" onClick={()=>db.areas.update(a.id,{archived:!a.archived})}>{a.archived?'Restore':'Archive'}</button></div>)}<button className="btn btn-secondary" onClick={()=>db.areas.add({id:`area-${crypto.randomUUID()}`,workspaceId:'default-ws',name:'New Area',color:'#14b8a6',icon:'●',sort:Date.now()})}>+ Add area</button></div>}
           {activeTab === 'data' && (
             <div className="space-y-6">
               {/* Backup & Restore */}
@@ -282,6 +295,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   ))}
                 </div>
               </div>
+              <div><h3 className="font-medium mb-2">Local reminders</h3><p className="text-sm mb-4" style={{color:'var(--text-tertiary)'}}>Atlas only asks for notification access when you choose. Reminders stay on this device.</p><button className="btn btn-secondary" disabled={!('Notification' in window)||Notification.permission==='granted'} onClick={async()=>{if('Notification' in window){const permission=await Notification.requestPermission();if(permission==='granted') window.location.reload()}}}>{'Notification' in window&&Notification.permission==='granted'?'✓ Reminders enabled':'Enable reminders'}</button></div>
+              {player&&<div><h3 className="font-medium mb-2">Gentle rewards</h3><p className="text-sm mb-3" style={{color:'var(--text-tertiary)'}}>Progress is encouraging, private, and never removes XP for missed days.</p><div className="reward-settings">{([['rewardsEnabled','XP and achievements'],['showXp','Show level progress'],['animationsEnabled','Celebrations'],['soundsEnabled','Reward sounds'],['streaksEnabled','Positive streaks']] as const).map(([key,label])=><label key={key}><input type="checkbox" checked={player[key]} onChange={e=>db.playerProfiles.update(player.id,{[key]:e.target.checked,updatedAt:Date.now()})}/><span>{label}</span></label>)}</div></div>}
             </div>
           )}
 

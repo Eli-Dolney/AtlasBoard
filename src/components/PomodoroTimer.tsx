@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { db, type FocusSession } from '../lib/db'
+import { awardOnce } from '../lib/life'
 
 const WORK_PRESETS = [
   { label: '15m', minutes: 15 },
@@ -62,6 +63,8 @@ export function PomodoroTimer({ workspaceId, isOpen, onClose, onMinimize }: Pomo
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current)
     }
+  // handleComplete is declared below and intentionally reads the latest timer state.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isRunning, timeLeft])
 
   const handleComplete = useCallback(async () => {
@@ -71,7 +74,7 @@ export function PomodoroTimer({ workspaceId, isOpen, onClose, onMinimize }: Pomo
     try {
       audioRef.current = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2teleVw8LU5+mX1ZNDB+kZqLbl1qgI+Wk4FybnqHkpSThoN8fIKDg4WGhoaFhYWFhYWFhYWFhYWFhYSEhISEhIODg4OCgoKBgYCAgH9/fn59fXx8e3t6enl5eHh3d3Z2dXV0dHNzcnJxcXBwb29ubm1tbGxra2pqaWloaGdnZmZlZWRkY2NiYmFhYGBfX15eXV1cXFtbWlpZWVhYV1dWVlVVVFRTU1JSUVFQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUVFRUlJTU1RUVVVWVldXWFhZWVpaW1tcXF1dXl5fX2BgYWFiYmNjZGRlZWZmZ2doaGlpampra2xsbW1ubm9vcHBxcXJyc3N0dHV1dnZ3d3h4eXl6ent7fHx9fX5+f3+AgIGBgoKDg4SEhYWGhoeHiIiJiYqKi4uMjI2Njo6Pj5CQkZGSkpOTlJSVlZaWl5eYmJmZmpqbm5ycnZ2enp+foKChoaKio6OkpKWlpqanp6ioqamqqqqrq6ysra2urq+vsLCxsbKysrOzs7S0tLS1tba2t7e4uLm5urq7u7y8vb2+vr+/wMDBwcLCw8PExMXFxsbHx8jIycnKysvLzMzNzc7Oz8/Q0NHR0tLT09TU1dXW1tfX2NjZ2dra29vc3N3d3t7f3+Dg4eHi4uPj5OTl5ebm5+fo6Onp6urr6+zs7e3u7u/v8PDx8fLy8/P09PX19vb39/j4+fn6+vv7/Pz9/f7+')
       audioRef.current.play()
-    } catch {}
+    } catch { /* audio playback can be blocked until user interaction */ }
 
     // Show notification
     if ('Notification' in window && Notification.permission === 'granted') {
@@ -90,6 +93,7 @@ export function PomodoroTimer({ workspaceId, isOpen, onClose, onMinimize }: Pomo
       type: mode
     }
     await db.focusSessions.put(session)
+    if (mode === 'work') await awardOnce(workspaceId, `focus:${session.id}`, 'focus', 15)
 
     if (mode === 'work') {
       setSessionsToday(s => s + 1)

@@ -2,6 +2,9 @@ import { useState, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Note } from '../../lib/db'
 import { RichTextEditor } from '../../components/RichTextEditor'
+import { useAreaSelection, useAreaPredicate } from '../../lib/areaSelection'
+import RelatedMindMaps from '../../components/RelatedMindMaps'
+import { useAtlasItemSelection } from '../../lib/itemSelection'
 
 interface NotesPageProps {
   workspaceId: string
@@ -18,15 +21,17 @@ const noteColors = [
 ]
 
 export default function NotesPage({ workspaceId }: NotesPageProps) {
-  const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null)
+  const selectedAreas=useAreaSelection(), isVisible=useAreaPredicate()
+  const [selectedNoteId, setSelectedNoteId] = useAtlasItemSelection('note')
   const [searchQuery, setSearchQuery] = useState('')
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
 
-  const notes = useLiveQuery(
+  const allNotes = useLiveQuery(
     () => db.notes.where('workspaceId').equals(workspaceId).reverse().sortBy('updatedAt'),
     [workspaceId],
     []
   )
+  const notes=allNotes.filter(n=>isVisible(n.areaId))
 
   const filteredNotes = useMemo(() => {
     if (!searchQuery) return notes
@@ -56,6 +61,7 @@ export default function NotesPage({ workspaceId }: NotesPageProps) {
       tags: [],
       createdAt: now,
       updatedAt: now,
+      areaId:selectedAreas[0]||'area-personal',
     }
     await db.notes.put(note)
     setSelectedNoteId(id)
@@ -224,6 +230,7 @@ export default function NotesPage({ workspaceId }: NotesPageProps) {
                 Last edited {new Date(selectedNote.updatedAt).toLocaleString()}
               </span>
             </div>
+            <RelatedMindMaps workspaceId={workspaceId} type="note" itemId={selectedNote.id}/>
           </>
         ) : (
           <div className="notes-editor-empty">
