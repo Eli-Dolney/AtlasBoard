@@ -2,21 +2,24 @@ import React, { useMemo, useState } from 'react'
 import Kanban from './Kanban'
 import { db, type Task, type TaskList } from '../../lib/db'
 import { onCreateTaskList, onOpenTask, emitOpenTask } from '../../lib/events'
+import { consumePendingItem } from '../../lib/navigation'
 import { useLiveQuery } from 'dexie-react-hooks'
 import TaskDetailModal from '../../components/TaskDetailModal'
+import { useAreaPredicate, useAreaSelection } from '../../lib/areaSelection'
 
 function useTasks(workspaceId: string) {
+  const isVisible=useAreaPredicate()
   const lists = useLiveQuery(
     () => db.lists.where('workspaceId').equals(workspaceId).sortBy('sort'),
     [workspaceId],
     []
   )
-  const tasks = useLiveQuery(
+  const allTasks = useLiveQuery(
     () => db.tasks.toArray(),
     [],
     []
   )
-  return { lists: lists ?? [], tasks: tasks ?? [] }
+  return { lists: lists ?? [], tasks: (allTasks ?? []).filter(t=>isVisible(t.areaId)) }
 }
 
 // ============================================
@@ -431,6 +434,7 @@ function ListView({ workspaceId, focusId }: { workspaceId: string; focusId?: str
 // ============================================
 function CalendarView({ workspaceId }: { workspaceId: string }) {
   const { tasks } = useTasks(workspaceId)
+  const selectedAreas=useAreaSelection()
   const [cursor, setCursor] = useState(new Date())
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   
@@ -466,7 +470,8 @@ function CalendarView({ workspaceId }: { workspaceId: string }) {
       title: 'New Task',
       dueAt: date.getTime(),
       status: 'not-started',
-      sort: Date.now()
+      sort: Date.now(),
+      areaId:selectedAreas[0]||'area-personal'
     }
     await db.tasks.put(task)
     setSelectedTaskId(task.id)
@@ -724,7 +729,7 @@ function MyTasksView({ workspaceId }: { workspaceId: string }) {
 // ============================================
 export default function TasksPage({ workspaceId }: { workspaceId: string }) {
   const [view, setView] = useState<'kanban' | 'list' | 'calendar' | 'mine' | 'timeline'>('kanban')
-  const [focusId, setFocusId] = useState<string | null>(null)
+  const [focusId, setFocusId] = useState<string | null>(()=>consumePendingItem('task'))
 
   React.useEffect(() => onOpenTask(d => {
     if (d.view) setView(d.view)

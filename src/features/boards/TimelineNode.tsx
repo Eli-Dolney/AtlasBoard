@@ -17,7 +17,7 @@ export default function TimelineNode({ id, data, selected }: NodeProps) {
         if (!list) {
           const listId = `l_${Date.now()}`
           await db.lists.put({ id: listId, workspaceId: WORKSPACE_ID, title: 'General', sort: 0 })
-          list = { id: listId } as any
+          list = { id: listId, workspaceId: WORKSPACE_ID, title: 'General', sort: 0 }
         }
 
         for (const e of data.events) {
@@ -60,7 +60,7 @@ export default function TimelineNode({ id, data, selected }: NodeProps) {
     if (!list) {
       const listId = `l_${Date.now()}`
       await db.lists.put({ id: listId, workspaceId: WORKSPACE_ID, title: 'General', sort: 0 })
-      list = { id: listId } as any
+      list = { id: listId, workspaceId: WORKSPACE_ID, title: 'General', sort: 0 }
     }
 
     const newTask: Task = {

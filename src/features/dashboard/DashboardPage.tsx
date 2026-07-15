@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type HabitLog } from '../../lib/db'
 import { DashboardCard } from './DashboardCard'
 import { PomodoroTimer } from '../../components/PomodoroTimer'
+import { useAreaPredicate } from '../../lib/areaSelection'
 
 interface DashboardPageProps {
   workspaceId: string
@@ -10,16 +11,19 @@ interface DashboardPageProps {
 }
 
 export default function DashboardPage({ workspaceId, onNavigate }: DashboardPageProps) {
+  const isVisible=useAreaPredicate()
   const [showPomodoroTimer, setShowPomodoroTimer] = useState(false)
   
   // Fetch stats from database
-  const boards = useLiveQuery(
+  const allBoards = useLiveQuery(
     () => db.boards.where('workspaceId').equals(workspaceId).toArray(),
     [workspaceId],
     []
   )
+  const boards=allBoards.filter(b=>isVisible(b.areaId))
 
-  const tasks = useLiveQuery(() => db.tasks.toArray(), [], [])
+  const allTasks = useLiveQuery(() => db.tasks.toArray(), [], [])
+  const tasks=allTasks.filter(t=>isVisible(t.areaId))
 
   const tables = useLiveQuery(
     () => db.tableMetas.where('workspaceId').equals(workspaceId).toArray(),
@@ -27,24 +31,28 @@ export default function DashboardPage({ workspaceId, onNavigate }: DashboardPage
     []
   )
 
-  const notes = useLiveQuery(() => db.notes?.toArray() ?? Promise.resolve([]), [], [])
+  const allNotes = useLiveQuery(() => db.notes?.toArray() ?? Promise.resolve([]), [], [])
+  const notes=allNotes.filter(n=>isVisible(n.areaId))
   
-  const docs = useLiveQuery(() => db.docs?.toArray() ?? Promise.resolve([]), [], [])
+  const allDocs = useLiveQuery(() => db.docs?.toArray() ?? Promise.resolve([]), [], [])
+  const docs=allDocs.filter(d=>isVisible(d.areaId))
   
   // Productivity data
-  const habits = useLiveQuery(
+  const allHabits = useLiveQuery(
     () => db.habits?.where('workspaceId').equals(workspaceId).and(h => !h.archived).toArray() ?? Promise.resolve([]),
     [workspaceId],
     []
   )
+  const habits=allHabits.filter(h=>isVisible(h.areaId))
   
   const habitLogs = useLiveQuery(() => db.habitLogs?.toArray() ?? Promise.resolve([]), [], [])
   
-  const goals = useLiveQuery(
+  const allGoals = useLiveQuery(
     () => db.goals?.where('workspaceId').equals(workspaceId).and(g => g.status === 'active').toArray() ?? Promise.resolve([]),
     [workspaceId],
     []
   )
+  const goals=allGoals.filter(g=>isVisible(g.areaId))
   
   const focusSessions = useLiveQuery(() => db.focusSessions?.toArray() ?? Promise.resolve([]), [], [])
   

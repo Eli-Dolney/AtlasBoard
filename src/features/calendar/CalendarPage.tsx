@@ -1,23 +1,38 @@
 import { useState, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Task } from '../../lib/db'
+import { inSelectedAreas } from '../../lib/areaSelection'
+import { expandCalendarEvents, findCalendarConflicts, moveTimestampToDate } from '../../lib/calendar'
 import TaskDetailModal from '../../components/TaskDetailModal'
+import EventDetailModal from '../../components/EventDetailModal'
+import { useAtlasItemSelection } from '../../lib/itemSelection'
 
 interface CalendarPageProps {
   workspaceId: string
+  selectedAreas?: string[]
 }
 
-type CalendarView = 'month' | 'week' | 'day'
+type CalendarView = 'month' | 'week' | 'day' | 'agenda'
+type DragItem = { type:'task'|'event'; id:string; occurrenceStart?:number }
 
-export default function CalendarPage({ workspaceId }: CalendarPageProps) {
+export default function CalendarPage({ workspaceId, selectedAreas = [] }: CalendarPageProps) {
   const [cursor, setCursor] = useState(new Date())
   const [view, setView] = useState<CalendarView>('month')
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  const [selectedEventId, setSelectedEventId] = useAtlasItemSelection('event')
+  const [draftEventDate, setDraftEventDate] = useState<Date | null>(null)
 
-  const tasks = useLiveQuery(() => db.tasks.toArray(), [], [])
+  const allTasks = useLiveQuery(() => db.tasks.toArray(), [], [])
+  const tasks = allTasks.filter(t => inSelectedAreas(t.areaId, selectedAreas))
+  const allEvents = useLiveQuery(() => db.calendarEvents.where('workspaceId').equals(workspaceId).toArray(), [workspaceId], [])
+  const events = allEvents.filter(e => inSelectedAreas(e.areaId, selectedAreas))
+  const areas = useLiveQuery(() => db.areas.where('workspaceId').equals(workspaceId).toArray(), [workspaceId], [])
 
   const year = cursor.getFullYear()
   const month = cursor.getMonth()
+  const occurrenceRange = useMemo(() => ({ start: new Date(year, month - 1, 1).getTime(), end: new Date(year, month + 2, 1).getTime() }), [year, month])
+  const occurrences = useMemo(() => expandCalendarEvents(events, occurrenceRange.start, occurrenceRange.end), [events, occurrenceRange])
+  const conflictIds=useMemo(()=>findCalendarConflicts(occurrences),[occurrences])
 
   // Generate calendar days for month view
   const monthDays = useMemo(() => {
@@ -42,8 +57,9 @@ export default function CalendarPage({ workspaceId }: CalendarPageProps) {
   const tasksByDay = useMemo(() => {
     const m: Record<string, Task[]> = {}
     for (const t of tasks) {
-      if (!t.dueAt) continue
-      const key = new Date(new Date(t.dueAt).toISOString().slice(0, 10)).toDateString()
+      const scheduled=t.scheduledStartAt??t.dueAt
+      if (!scheduled) continue
+      const key = new Date(scheduled).toDateString()
       if (!m[key]) m[key] = []
       m[key].push(t)
     }
@@ -69,6 +85,26 @@ export default function CalendarPage({ workspaceId }: CalendarPageProps) {
     setSelectedTaskId(task.id)
   }
 
+  const addEventAtDate = (date: Date) => setDraftEventDate(new Date(date))
+
+  const startDrag=(event:React.DragEvent,item:DragItem)=>{event.stopPropagation();event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('application/x-atlas-item',JSON.stringify(item))}
+  const dropOnDate=async(event:React.DragEvent,date:Date,hour?:number)=>{
+    event.preventDefault();event.stopPropagation()
+    const raw=event.dataTransfer.getData('application/x-atlas-item');if(!raw)return
+    const item=JSON.parse(raw) as DragItem
+    if(item.type==='task'){
+      const task=await db.tasks.get(item.id);if(!task)return
+      const original=task.scheduledStartAt??task.dueAt??date.getTime(),next=moveTimestampToDate(original,date,hour)
+      const duration=(task.scheduledEndAt??original+3600000)-original
+      await db.tasks.update(task.id,{scheduledStartAt:next,scheduledEndAt:next+Math.max(0,duration),dueAt:task.dueAt??next})
+    }else{
+      const calendarEvent=await db.calendarEvents.get(item.id);if(!calendarEvent)return
+      const original=item.occurrenceStart??calendarEvent.startAt,next=moveTimestampToDate(original,date,hour)
+      const shift=next-original
+      await db.calendarEvents.update(calendarEvent.id,{startAt:calendarEvent.startAt+shift,endAt:calendarEvent.endAt+shift,updatedAt:Date.now()})
+    }
+  }
+
   const statusColors: Record<string, string> = {
     'not-started': 'var(--brand-primary)',
     'in-progress': 'var(--status-in-progress)',
@@ -81,9 +117,9 @@ export default function CalendarPage({ workspaceId }: CalendarPageProps) {
       setCursor(new Date(year, month - 1, 1))
     } else if (view === 'week') {
       setCursor(new Date(cursor.getTime() - 7 * 24 * 60 * 60 * 1000))
-    } else {
+    } else if(view==='day') {
       setCursor(new Date(cursor.getTime() - 24 * 60 * 60 * 1000))
-    }
+    } else setCursor(new Date(cursor.getFullYear(),cursor.getMonth()-1,cursor.getDate()))
   }
 
   const navigateNext = () => {
@@ -91,9 +127,9 @@ export default function CalendarPage({ workspaceId }: CalendarPageProps) {
       setCursor(new Date(year, month + 1, 1))
     } else if (view === 'week') {
       setCursor(new Date(cursor.getTime() + 7 * 24 * 60 * 60 * 1000))
-    } else {
+    } else if(view==='day') {
       setCursor(new Date(cursor.getTime() + 24 * 60 * 60 * 1000))
-    }
+    } else setCursor(new Date(cursor.getFullYear(),cursor.getMonth()+1,cursor.getDate()))
   }
 
   const getHeaderTitle = () => {
@@ -103,20 +139,21 @@ export default function CalendarPage({ workspaceId }: CalendarPageProps) {
       const start = weekDays[0]
       const end = weekDays[6]
       return `${start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} - ${end.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`
-    } else {
+    } else if(view==='day') {
       return cursor.toLocaleDateString(undefined, {
         weekday: 'long',
         month: 'long',
         day: 'numeric',
         year: 'numeric',
       })
-    }
+    } else return `Agenda · ${cursor.toLocaleDateString(undefined,{month:'long',year:'numeric'})}`
   }
 
   // Render day cell content
   const renderDayCell = (d: Date, isCompact = false) => {
     const key = new Date(d.toISOString().slice(0, 10)).toDateString()
     const dayTasks = tasksByDay[key] ?? []
+    const dayEvents = occurrences.filter(e => e.startAt < new Date(d.getFullYear(),d.getMonth(),d.getDate()+1).getTime() && e.endAt > new Date(d.getFullYear(),d.getMonth(),d.getDate()).getTime())
     const inMonth = d.getMonth() === month
     const isToday = new Date().toDateString() === key
 
@@ -129,6 +166,8 @@ export default function CalendarPage({ workspaceId }: CalendarPageProps) {
             addTaskAtDate(d)
           }
         }}
+        onDragOver={e=>{e.preventDefault();e.dataTransfer.dropEffect='move'}}
+        onDrop={e=>dropOnDate(e,d)}
       >
         <div className="flex items-center justify-between mb-2">
           <span className="calendar-day-number">{d.getDate()}</span>
@@ -144,8 +183,11 @@ export default function CalendarPage({ workspaceId }: CalendarPageProps) {
           </button>
         </div>
         <div className="calendar-day-events">
+          {dayEvents.slice(0, 3).map(e => <div draggable onDragStart={drag=>startDrag(drag,{type:'event',id:e.sourceEventId,occurrenceStart:e.startAt})} key={e.occurrenceId} className={`calendar-event calendar-event-scheduled ${conflictIds.has(e.occurrenceId)?'calendar-conflict':''}`} onClick={click=>{click.stopPropagation();setSelectedEventId(e.sourceEventId)}} style={{ background: e.color || areas.find(a=>a.id===e.areaId)?.color || 'var(--brand-primary)' }} title={`${e.title}${e.location ? ` · ${e.location}` : ''}${conflictIds.has(e.occurrenceId)?' · Conflicts with another event':''}`}>{e.allDay?'◆':'◷'} {e.title}{e.recurrence&&e.recurrence!=='none'?' ↻':''}{conflictIds.has(e.occurrenceId)?' ⚠':''}</div>)}
           {dayTasks.slice(0, isCompact ? 2 : 4).map(t => (
             <div
+              draggable
+              onDragStart={drag=>startDrag(drag,{type:'task',id:t.id})}
               key={t.id}
               className={`calendar-event ${t.status === 'done' ? 'done' : ''}`}
               style={{
@@ -175,6 +217,9 @@ export default function CalendarPage({ workspaceId }: CalendarPageProps) {
   const renderDayView = () => {
     const key = new Date(cursor.toISOString().slice(0, 10)).toDateString()
     const dayTasks = tasksByDay[key] ?? []
+    const dayStart = new Date(cursor.getFullYear(),cursor.getMonth(),cursor.getDate()).getTime()
+    const dayEnd = new Date(cursor.getFullYear(),cursor.getMonth(),cursor.getDate()+1).getTime()
+    const dayEvents = occurrences.filter(e=>e.startAt<dayEnd&&e.endAt>dayStart)
     const hours = [...Array(24)].map((_, i) => i)
 
     return (
@@ -193,11 +238,12 @@ export default function CalendarPage({ workspaceId }: CalendarPageProps) {
 
         <div className="calendar-hours">
           {hours.map(hour => (
-            <div key={hour} className="calendar-hour">
+            <div key={hour} className="calendar-hour" onDragOver={e=>e.preventDefault()} onDrop={e=>dropOnDate(e,cursor,hour)}>
               <div className="calendar-hour-label">
                 {hour.toString().padStart(2, '0')}:00
               </div>
               <div className="calendar-hour-content">
+                {dayEvents.filter(e=>!e.allDay&&new Date(e.startAt).getHours()===hour).map(e=><div draggable onDragStart={drag=>startDrag(drag,{type:'event',id:e.sourceEventId,occurrenceStart:e.startAt})} key={e.occurrenceId} className={`calendar-hour-event ${conflictIds.has(e.occurrenceId)?'calendar-conflict':''}`} style={{background:e.color||areas.find(a=>a.id===e.areaId)?.color}} onClick={()=>setSelectedEventId(e.sourceEventId)}>◷ {e.title}{conflictIds.has(e.occurrenceId)?' ⚠':''}</div>)}
                 {dayTasks
                   .filter(t => {
                     if (!t.dueAt) return false
@@ -206,6 +252,8 @@ export default function CalendarPage({ workspaceId }: CalendarPageProps) {
                   })
                   .map(t => (
                     <div
+                      draggable
+                      onDragStart={drag=>startDrag(drag,{type:'task',id:t.id})}
                       key={t.id}
                       className="calendar-hour-event"
                       style={{
@@ -223,10 +271,11 @@ export default function CalendarPage({ workspaceId }: CalendarPageProps) {
         </div>
 
         {/* All day tasks */}
-        {dayTasks.length > 0 && (
+        {(dayTasks.length > 0 || dayEvents.some(e=>e.allDay)) && (
           <div className="calendar-all-day">
             <h3 className="calendar-all-day-title">Tasks for this day</h3>
             <div className="calendar-all-day-list">
+              {dayEvents.filter(e=>e.allDay).map(e=><div key={e.occurrenceId} className="calendar-all-day-item" onClick={()=>setSelectedEventId(e.sourceEventId)}><div className="calendar-all-day-dot" style={{background:e.color||areas.find(a=>a.id===e.areaId)?.color}}/><span>{e.title}</span></div>)}
               {dayTasks.map(t => (
                 <div
                   key={t.id}
@@ -254,12 +303,19 @@ export default function CalendarPage({ workspaceId }: CalendarPageProps) {
     )
   }
 
+  const renderAgendaView=()=>{
+    const rangeStart=new Date(cursor.getFullYear(),cursor.getMonth(),1).getTime(),rangeEnd=new Date(cursor.getFullYear(),cursor.getMonth()+1,1).getTime()
+    const items=[...occurrences.filter(e=>e.startAt>=rangeStart&&e.startAt<rangeEnd).map(e=>({key:e.occurrenceId,at:e.startAt,title:e.title,areaId:e.areaId,type:'event' as const,id:e.sourceEventId,occurrenceStart:e.startAt,done:false})),...tasks.filter(t=>{const at=t.scheduledStartAt??t.dueAt;return at&&at>=rangeStart&&at<rangeEnd}).map(t=>({key:t.id,at:t.scheduledStartAt??t.dueAt!,title:t.title,areaId:t.areaId,type:'task' as const,id:t.id,done:t.status==='done'}))].sort((a,b)=>a.at-b.at)
+    return <div className="calendar-agenda">{items.length===0?<div className="calendar-agenda-empty"><span>🗓️</span><h3>Your month is open</h3><p>Drag an unscheduled task onto a date, or add an event.</p></div>:items.map((item,index)=>{const previous=items[index-1],showDate=!previous||new Date(previous.at).toDateString()!==new Date(item.at).toDateString();return <div key={item.key}>{showDate&&<h3 className="agenda-date">{new Date(item.at).toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'})}</h3>}<div draggable onDragStart={drag=>startDrag(drag,{type:item.type,id:item.id,occurrenceStart:'occurrenceStart' in item?item.occurrenceStart:undefined})} className={`agenda-item ${item.done?'done':''}`} onClick={()=>item.type==='task'?setSelectedTaskId(item.id):setSelectedEventId(item.id)} style={{borderLeftColor:areas.find(a=>a.id===item.areaId)?.color}}><time>{new Date(item.at).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}</time><span>{item.type==='event'?'◷':'✓'}</span><b>{item.title}</b><small>{areas.find(a=>a.id===item.areaId)?.name}</small></div></div>})}</div>
+  }
+
   return (
     <div className="calendar-page">
       <div className="calendar">
         {/* Calendar Header */}
         <div className="calendar-header">
           <div className="flex items-center gap-2">
+            <button className="btn btn-primary btn-sm" onClick={() => addEventAtDate(cursor)}>+ Event</button>
             <button className="btn btn-secondary btn-sm" onClick={navigatePrev}>
               ←
             </button>
@@ -292,6 +348,7 @@ export default function CalendarPage({ workspaceId }: CalendarPageProps) {
               >
                 Day
               </button>
+              <button className={`btn btn-sm ${view==='agenda'?'btn-primary':'btn-ghost'}`} onClick={()=>setView('agenda')}>Agenda</button>
             </div>
           </div>
         </div>
@@ -330,11 +387,15 @@ export default function CalendarPage({ workspaceId }: CalendarPageProps) {
         )}
 
         {view === 'day' && renderDayView()}
+        {view === 'agenda' && renderAgendaView()}
       </div>
 
       {/* Upcoming Tasks Sidebar */}
       <div className="calendar-sidebar">
-        <h3 className="calendar-sidebar-title">Upcoming Tasks</h3>
+        <h3 className="calendar-sidebar-title">Unscheduled</h3>
+        <p className="calendar-sidebar-hint">Drag these onto the calendar</p>
+        <div className="calendar-sidebar-list unscheduled-list">{tasks.filter(t=>!t.scheduledStartAt&&!t.dueAt&&t.status!=='done').slice(0,8).map(t=><div draggable onDragStart={drag=>startDrag(drag,{type:'task',id:t.id})} key={t.id} className="calendar-sidebar-item"><div className="calendar-sidebar-dot" style={{background:areas.find(a=>a.id===t.areaId)?.color||statusColors[t.status||'not-started']}}/><div className="calendar-sidebar-content"><span className="calendar-sidebar-task-title">{t.title}</span><span className="calendar-sidebar-task-date">Drag to schedule</span></div></div>)}{tasks.filter(t=>!t.scheduledStartAt&&!t.dueAt&&t.status!=='done').length===0&&<p className="text-caption calendar-sidebar-empty">Nothing waiting</p>}</div>
+        <h3 className="calendar-sidebar-title upcoming-title">Upcoming Tasks</h3>
         <div className="calendar-sidebar-list">
           {tasks
             .filter(t => t.dueAt && t.status !== 'done')
@@ -371,6 +432,7 @@ export default function CalendarPage({ workspaceId }: CalendarPageProps) {
         isOpen={selectedTaskId !== null}
         onClose={() => setSelectedTaskId(null)}
       />
+      <EventDetailModal eventId={selectedEventId} draftDate={draftEventDate} workspaceId={workspaceId} defaultAreaId={selectedAreas[0]||areas[0]?.id||'area-personal'} onClose={()=>{setSelectedEventId(null);setDraftEventDate(null)}} />
     </div>
   )
 }

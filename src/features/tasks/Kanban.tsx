@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { db, type Task, type TaskList } from '../../lib/db'
+import { useAreaPredicate, useAreaSelection } from '../../lib/areaSelection'
 import { useLiveQuery } from 'dexie-react-hooks'
 import TaskDetailModal from '../../components/TaskDetailModal'
 
@@ -17,6 +18,7 @@ const statusColors = {
 }
 
 export default function Kanban({ workspaceId }: { workspaceId: string }) {
+  const isVisible=useAreaPredicate(), selectedAreas=useAreaSelection()
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [editingListId, setEditingListId] = useState<string | null>(null)
   const [draggingTask, setDraggingTask] = useState<Task | null>(null)
@@ -27,11 +29,12 @@ export default function Kanban({ workspaceId }: { workspaceId: string }) {
     [] as TaskList[]
   )
 
-  const tasks = useLiveQuery(
+  const allTasks = useLiveQuery(
     () => db.tasks.toArray(),
     [],
     [] as Task[]
   )
+  const tasks=allTasks.filter(t=>isVisible(t.areaId))
 
   const tasksByList = useMemo(() => {
     const map: Record<string, Task[]> = {}
@@ -65,7 +68,8 @@ export default function Kanban({ workspaceId }: { workspaceId: string }) {
       title: 'New Task', 
       sort,
       status: 'not-started',
-      priority: 'medium'
+      priority: 'medium',
+      areaId:selectedAreas[0]||'area-personal'
     }
     await db.tasks.put(task)
     setSelectedTaskId(task.id)

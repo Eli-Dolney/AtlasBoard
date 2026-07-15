@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { searchService, type SearchResult } from '../lib/search'
+import { useAreaSelection } from '../lib/areaSelection'
 
 interface SearchDialogProps {
   isOpen: boolean
@@ -8,6 +9,11 @@ interface SearchDialogProps {
 }
 
 export function SearchDialog({ isOpen, onClose, onSelectResult }: SearchDialogProps) {
+  const selectedAreas=useAreaSelection()
+  const [typeFilter,setTypeFilter]=useState<SearchResult['type']|''>('')
+  const [statusFilter,setStatusFilter]=useState('')
+  const [dateFilter,setDateFilter]=useState<'any'|'upcoming'|'past'>('any')
+  const [tagFilter,setTagFilter]=useState('')
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchResult[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -20,6 +26,7 @@ export function SearchDialog({ isOpen, onClose, onSelectResult }: SearchDialogPr
       setQuery('')
       setResults([])
       setSelectedIndex(0)
+      void searchService.reindex()
     }
   }, [isOpen])
 
@@ -32,7 +39,8 @@ export function SearchDialog({ isOpen, onClose, onSelectResult }: SearchDialogPr
 
       setIsLoading(true)
       try {
-        const searchResults = await searchService.search(query)
+        const now=Date.now()
+        const searchResults = await searchService.search(query,{areaIds:selectedAreas,types:typeFilter?[typeFilter]:undefined,statuses:statusFilter?[statusFilter]:undefined,dateFrom:dateFilter==='upcoming'?now:undefined,dateTo:dateFilter==='past'?now:undefined,tags:tagFilter.trim()?[tagFilter.trim()]:undefined})
         setResults(searchResults.slice(0, 20)) // Limit to 20 results
         setSelectedIndex(0)
       } catch (error) {
@@ -45,7 +53,7 @@ export function SearchDialog({ isOpen, onClose, onSelectResult }: SearchDialogPr
 
     const debounceTimer = setTimeout(performSearch, 150)
     return () => clearTimeout(debounceTimer)
-  }, [query])
+  }, [query,selectedAreas,typeFilter,statusFilter,dateFilter,tagFilter])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -89,6 +97,11 @@ export function SearchDialog({ isOpen, onClose, onSelectResult }: SearchDialogPr
         return '📝'
       case 'node':
         return '🧠'
+      case 'note': return '🗒️'
+      case 'doc': return '📄'
+      case 'event': return '📅'
+      case 'habit': return '🔥'
+      case 'goal': return '🎯'
       default:
         return '📄'
     }
@@ -104,6 +117,11 @@ export function SearchDialog({ isOpen, onClose, onSelectResult }: SearchDialogPr
         return 'List'
       case 'node':
         return 'Node'
+      case 'note': return 'Note'
+      case 'doc': return 'Document'
+      case 'event': return 'Event'
+      case 'habit': return 'Habit'
+      case 'goal': return 'Goal'
       default:
         return 'Item'
     }
@@ -125,7 +143,7 @@ export function SearchDialog({ isOpen, onClose, onSelectResult }: SearchDialogPr
             <input
               ref={inputRef}
               type="text"
-              placeholder="Search across all boards, tasks, and notes..."
+              placeholder="Search tasks, events, maps, notes, goals, and more..."
               value={query}
               onChange={e => setQuery(e.target.value)}
               className="flex-1 border-0 bg-transparent text-lg outline-none"
@@ -134,6 +152,7 @@ export function SearchDialog({ isOpen, onClose, onSelectResult }: SearchDialogPr
               ✕
             </button>
           </div>
+          <div className="search-filters"><select className="select" aria-label="Content type" value={typeFilter} onChange={e=>setTypeFilter(e.target.value as SearchResult['type']|'')}><option value="">All content</option><option value="task">Tasks</option><option value="event">Events</option><option value="habit">Habits</option><option value="goal">Goals</option><option value="board">Mind maps</option><option value="node">Map nodes</option><option value="note">Notes</option><option value="doc">Documents</option></select><select className="select" aria-label="Status" value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}><option value="">Any status</option><option value="active">Active</option><option value="scheduled">Scheduled</option><option value="not-started">Not started</option><option value="in-progress">In progress</option><option value="done">Done</option><option value="completed">Completed</option><option value="archived">Archived</option></select><select className="select" aria-label="Date" value={dateFilter} onChange={e=>setDateFilter(e.target.value as 'any'|'upcoming'|'past')}><option value="any">Any date</option><option value="upcoming">Upcoming</option><option value="past">Past</option></select><input className="input" aria-label="Tag" value={tagFilter} onChange={e=>setTagFilter(e.target.value)} placeholder="Tag" />{selectedAreas.length>0&&<span className="tag">Area filter active</span>}</div>
         </div>
 
         {/* Results */}

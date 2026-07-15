@@ -6,7 +6,7 @@ export function getStoredTheme(): ThemePreference {
     if (saved === 'light' || saved === 'dark' || saved === 'system') {
       return saved
     }
-  } catch {}
+  } catch { /* localStorage may be unavailable in private contexts */ }
   return 'system'
 }
 

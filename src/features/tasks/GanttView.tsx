@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Task } from '../../lib/db'
+import { useAreaPredicate } from '../../lib/areaSelection'
 
 interface GanttViewProps {
   workspaceId: string
@@ -11,6 +12,7 @@ const DAY_WIDTH = 40
 const ROW_HEIGHT = 36
 
 export default function GanttView({ workspaceId, onTaskClick }: GanttViewProps) {
+  const isVisible=useAreaPredicate()
   const containerRef = useRef<HTMLDivElement>(null)
   const [, setScrollLeft] = useState(0)
 
@@ -29,9 +31,10 @@ export default function GanttView({ workspaceId, onTaskClick }: GanttViewProps) 
   // Filter tasks with due dates and sort
   const tasks = useMemo(() => {
     return allTasks
+      .filter(t=>isVisible(t.areaId))
       .filter(t => t.dueAt)
       .sort((a, b) => (a.dueAt || 0) - (b.dueAt || 0))
-  }, [allTasks])
+  }, [allTasks, isVisible])
 
   // Calculate date range
   const { startDate, totalDays, weeks } = useMemo(() => {

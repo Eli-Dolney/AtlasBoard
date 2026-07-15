@@ -2,6 +2,9 @@ import { useState, useMemo, useCallback } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Doc } from '../../lib/db'
 import { RichTextEditor } from '../../components/RichTextEditor'
+import { useAreaSelection, useAreaPredicate } from '../../lib/areaSelection'
+import RelatedMindMaps from '../../components/RelatedMindMaps'
+import { useAtlasItemSelection } from '../../lib/itemSelection'
 
 interface DocsPageProps {
   workspaceId: string
@@ -10,17 +13,19 @@ interface DocsPageProps {
 const DOC_ICONS = ['📄', '📝', '📋', '📌', '📎', '🗂️', '📁', '📂', '🔖', '💡', '⭐', '🎯']
 
 export default function DocsPage({ workspaceId }: DocsPageProps) {
-  const [selectedDocId, setSelectedDocId] = useState<string | null>(null)
+  const selectedAreas=useAreaSelection(), isVisible=useAreaPredicate()
+  const [selectedDocId, setSelectedDocId] = useAtlasItemSelection('doc')
   const [searchQuery, setSearchQuery] = useState('')
   const [showAddModal, setShowAddModal] = useState(false)
   const [editingDocMeta, setEditingDocMeta] = useState<Doc | null>(null)
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
 
-  const docs = useLiveQuery(
+  const allDocs = useLiveQuery(
     () => db.docs.where('workspaceId').equals(workspaceId).reverse().sortBy('updatedAt'),
     [workspaceId],
     []
   )
+  const docs=allDocs.filter(d=>isVisible(d.areaId))
 
   const selectedDoc = docs.find(d => d.id === selectedDocId)
 
@@ -60,7 +65,8 @@ export default function DocsPage({ workspaceId }: DocsPageProps) {
       content: '',
       icon: '📄',
       createdAt: Date.now(),
-      updatedAt: Date.now()
+      updatedAt: Date.now(),
+      areaId:selectedAreas[0]||'area-personal'
     }
     await db.docs.put(newDoc)
     setSelectedDocId(newDoc.id)
@@ -329,6 +335,7 @@ export default function DocsPage({ workspaceId }: DocsPageProps) {
                 onChange={handleContentChange}
               />
             </div>
+            <RelatedMindMaps workspaceId={workspaceId} type="doc" itemId={selectedDoc.id}/>
 
             {/* Child pages */}
             {docTree.childrenMap[selectedDoc.id]?.length > 0 && (

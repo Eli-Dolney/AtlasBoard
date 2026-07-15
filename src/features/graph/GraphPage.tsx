@@ -11,10 +11,12 @@ import { Background } from '@reactflow/background'
 import { Controls } from '@reactflow/controls'
 import { db } from '../../lib/db'
 import { extractOutboundTitles } from '../../lib/links'
+import { useAreaPredicate } from '../../lib/areaSelection'
 import '@reactflow/core/dist/style.css'
 import '@reactflow/controls/dist/style.css'
 
 export default function GraphPage({ workspaceId }: { workspaceId: string }) {
+  const isVisible=useAreaPredicate()
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
   const [loading, setLoading] = useState(true)
@@ -26,16 +28,16 @@ export default function GraphPage({ workspaceId }: { workspaceId: string }) {
 
   useEffect(() => {
     const load = async () => {
-      const boards = await db.boards.where('workspaceId').equals(workspaceId).toArray()
+      const boards = (await db.boards.where('workspaceId').equals(workspaceId).toArray()).filter(board=>isVisible(board.areaId))
       const allNodes: Node[] = []
       const allEdges: Edge[] = []
       
       // 1. Extract nodes and internal edges from all boards
       for (const board of boards) {
         try {
-          const data = JSON.parse(board.data)
+          const data = JSON.parse(board.data) as {nodes?:Array<{id:string;data?:{label?:string;color?:string}}>;edges?:Array<{id:string;source:string;target:string}>}
           if (data.nodes) {
-            data.nodes.forEach((n: any) => {
+            data.nodes.forEach(n => {
               // prefix id with board id to avoid collisions
               const id = `${board.id}__${n.id}`
               allNodes.push({
@@ -65,7 +67,7 @@ export default function GraphPage({ workspaceId }: { workspaceId: string }) {
             })
           }
           if (data.edges) {
-            data.edges.forEach((e: any) => {
+            data.edges.forEach(e => {
               allEdges.push({
                 id: `${board.id}__${e.id}`,
                 source: `${board.id}__${e.source}`,
@@ -75,7 +77,7 @@ export default function GraphPage({ workspaceId }: { workspaceId: string }) {
               })
             })
           }
-        } catch (e) {
+        } catch {
           console.error('Failed to parse board', board.id)
         }
       }
@@ -117,7 +119,7 @@ export default function GraphPage({ workspaceId }: { workspaceId: string }) {
       setLoading(false)
     }
     load()
-  }, [workspaceId, setNodes, setEdges])
+  }, [workspaceId, setNodes, setEdges, isVisible])
 
   // Simple Force Simulation
   useEffect(() => {
@@ -226,4 +228,3 @@ export default function GraphPage({ workspaceId }: { workspaceId: string }) {
     </div>
   )
 }
-
